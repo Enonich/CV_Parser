@@ -1,1 +1,2 @@
-.env:
+# Ignore the environment variables file
+.env
