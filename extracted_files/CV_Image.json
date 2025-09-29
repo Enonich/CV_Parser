@@ -2,10 +2,9 @@
   "CV_data": {
     "structured_data": {
       "name": "Aidoo Enoch Kwadwo",
-      "email": "aidooenochkwadwo@gmail.com",
+      "email": "aidoenochkwadwo@gmail.com",
       "phone": "0240542834",
       "summary": "A Data Analyst with about two years of professional experience specialized in transforming complex datasets into strategic business solutions. I've consistently delivered actionable insights that have driven key business decisions. Combining strong analytical skills with business acumen, I excel at identifying data patterns and translating them into clear, implementable strategies that solve real-world challenges.",
-      "years_of_experience": 1.83,
       "work_experience": [
         {
           "company": "Really Great Tech",
@@ -71,8 +70,7 @@
         "Problem Solving Skills",
         "Teamwork",
         "Initiative and Self-motivation",
-        "Discipline",
-        "Resilient"
+        "Discipline and Resilient"
       ],
       "certifications": [
         {
@@ -97,13 +95,13 @@
         },
         {
           "name": "Machine Learning",
-          "issuing_organization": "Stanford University",
+          "issuing_organization": "Stanford University (via Coursera)",
           "date": "Present"
         },
         {
           "name": "Google Data Analytics Professional Certificate",
           "issuing_organization": "Google",
-          "date": "May 2023"
+          "date": "Present"
         },
         {
           "name": "ALX Data Science",
@@ -137,7 +135,7 @@
           ]
         },
         {
-          "name": "Power BI Dashboards Development",
+          "name": "Power BI Dashboards for Project Management",
           "description": "Developed stakeholder-driven Power BI dashboards with advanced DAX calculations and multi-level drill-downs to monitor project progress, budgets, and impact. The dashboards improved transparency, performance tracking, and decision-making at national, provincial, and local levels.",
           "technologies": [
             "Power BI",
@@ -147,8 +145,10 @@
       ],
       "languages": [],
       "hobbies": [],
-      "other": ""
+      "other": "",
+      "years_of_experience": 1.83
     },
-    "format": "structured_json"
+    "format"
+    : "structured_json"
   }
 }
