@@ -1,0 +1,74 @@
+{
+  "name": "Aidoo Enoch Kwadwo",
+  "email": "aidooenochkwadwo@gmail.com",
+  "phone": "0240542834",
+  "summary": "A Data Analyst with about two years of professional experience specialized in transforming complex datasets into strategic business solutions. I've consistently delivered actionable insights that have driven key business decisions. Combining strong analytical skills with business acumen, I excel at identifying data patterns and translating them into clear, implementable strategies that solve real-world challenges.",
+  "work_experience": [
+    {
+      "company": "Really Great Tech",
+      "role": "Data Analytics/AI/ML Engineer",
+      "start_date": "November 2023",
+      "end_date": "October 2024",
+      "description": "Conducted Shapelet Analysis on trained machine learning models to interpret performance patterns and identify opportunities for optimization in an Al project. Created a dynamic Google Sheets pivot table to track projects, employee assignments, and mentorship relationships for improved team visibility. Analyzed patient data and developed a predictive model for heart disease diagnosis, integrated into a user-friendly web application to support clinical decision-making."
+    },
+    {
+      "company": "Freelancer (ALX venturers)",
+      "role": "Data Scientist",
+      "start_date": "September 2024",
+      "end_date": "Present",
+      "description": "Led a freelance team to analyze tourist consumer behavior using advanced data analytics techniques to uncover trends and patterns and built a predictive model to forecast revenue and optimize customer pricing strategies for a tourist agency."
+    }
+  ],
+  "education": [
+    {
+      "institution": "KNUST, Ghana",
+      "degree": "Bachelor of Science in Computer Science",
+      "start_date": null,
+      "end_date": "2023"
+    }
+  ],
+  "skills": [
+    "Python",
+    "R",
+    "AWS",
+    "Microsoft Excel",
+    "Google Sheets",
+    "Power BI",
+    "SQL",
+    "NumPy",
+    "Pandas",
+    "Scikit-Learn",
+    "Matplotlib",
+    "Pytorch"
+  ],
+  "soft_skills": [
+    "Curiosity",
+    "Problem Solving",
+    "System",
+    "Understanding",
+    "Analytical Thinking",
+    "Problem Solving Skills",
+    "Teamwork",
+    "Initiative and Self-motivation",
+    "Discipline and Resilient"
+  ],
+  "certifications": [
+    "Coursera Crash Course on Python. Oct 2021",
+    "AWS Machine Learning Foundation. Oct 2021",
+    "Introduction to Deep Learning with Pytorch. Sep 2022",
+    "Machine Learning for Trading on Udacity. May 2023",
+    "Machine Learning. Present",
+    "Google Data Analytics Professional Certificate. Present",
+    "ALX Data Science May 2023",
+    "AWS Certified Cloud Practitioner Aug 2025"
+  ],
+  "projects": [
+    "Conducted advanced Excel analysis on water access datasets, applying data cleaning, formulas, statistical functions, and pivot tables. Designed visualizations (stacked bar charts, box & whisker plots) to uncover disparities across urban/rural areas and income groups, supporting evidence-based resource allocation.",
+    "Built a predictive model for quantitative finance using historical market data, achieving a validation MSE of 0.998. The model improved risk forecasting accuracy and provided actionable insights for financial decision-making.",
+    "Led SQL-based analysis of 60,000+ water infrastructure records, using advanced queries and aggregation techniques to identify critical gaps in community water access. Delivered data-driven recommendations that guided infrastructure planning and resource distribution.",
+    "Developed stakeholder-driven Power BI dashboards with advanced DAX calculations and multi-level drill-downs to monitor project progress, budgets, and impact. The dashboards improved transparency, performance tracking, and decision-making at national, provincial, and local levels."
+  ],
+  "languages": null,
+  "hobbies": null,
+  "other": null
+}
