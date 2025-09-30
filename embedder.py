@@ -22,12 +22,12 @@ sections = [
 embeddings = OllamaEmbeddings(model="mxbai-embed-large")
 
 # --- Generate cv_id from email (hashed for privacy) ---
-email = cv_struct.get("email", "").lower().strip()
+email = cv_struct.get("email", "")
 if not email:
     # fallback to filename if email missing
     cv_id = os.path.splitext(os.path.basename(cv_json_path))[0]
 else:
-    cv_id = hashlib.md5(email.encode()).hexdigest()
+    cv_id = hashlib.md5(email.strip().lower().encode()).hexdigest()
 
 print(f"Embedding CV with cv_id: {cv_id}")
 
@@ -59,7 +59,7 @@ vectorstore = Chroma.from_documents(
     persist_directory="./chroma_db",
     collection_name="cv_sections"
 )
-vectorstore.persist()
+# vectorstore.persist()
 
 # # --- Example retrieval ---
 # query = "data science experience"
