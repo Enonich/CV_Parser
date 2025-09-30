@@ -72,8 +72,8 @@ def hash_email(email):
 # --- Main scoring function ---
 def score_cv_against_job(cv_json_path, job_description_path, min_experience_years=2):
     weights = {
-        "hard_filters": 0.30,
-        "semantic_similarity": 0.40,
+        "hard_filters": 0.25,
+        "semantic_similarity": 0.45,
         "experience_alignment": 0.15,
         "education_alignment": 0.15
     }
@@ -144,6 +144,10 @@ def score_cv_against_job(cv_json_path, job_description_path, min_experience_year
         cv_id = hash_email(email)
     else:
         cv_id = os.path.splitext(os.path.basename(cv_json_path))[0]
+
+    print(f"DEBUG - Email: {email}")
+    print(f"DEBUG - cv_id: {cv_id}")
+
 
     # --- Hard Score ---
     hard_score = 0.0
