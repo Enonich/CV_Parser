@@ -61,8 +61,8 @@ vectorstore = Chroma.from_documents(
 )
 vectorstore.persist()
 
-# --- Example retrieval ---
-query = "data science experience"
-results = vectorstore.similarity_search(query, k=3, filter={"section": "work_experience"})
-for doc in results:
-    print(f"Section: {doc.metadata['section']}\nContent: {doc.page_content[:200]}...\n")
+# # --- Example retrieval ---
+# query = "data science experience"
+# results = vectorstore.similarity_search(query, k=3, filter={"section": "work_experience"})
+# for doc in results:
+#     print(f"Section: {doc.metadata['section']}\nContent: {doc.page_content[:200]}...\n")
