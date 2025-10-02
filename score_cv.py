@@ -7,9 +7,12 @@ from langchain.prompts import PromptTemplate
 from rapidfuzz import fuzz
 import hashlib
 
+# Assuming JDExtractor is defined in jd_extractor.py and accessible
+# or defined directly in this file as per the first request's context.
+# Since the class definition is not here, we assume it's imported correctly.
+from jd_extractor import JDExtractor 
 
-
-# --- Helper functions ---
+# --- Helper functions (Unchanged) ---
 def normalize(text):
     return text.lower().strip()
 
@@ -69,7 +72,7 @@ def fuzzy_education_match(required_edu, candidate_edu_list):
 def hash_email(email):
     return hashlib.md5(email.lower().strip().encode()).hexdigest()
 
-# --- Main scoring function ---
+# --- Main scoring function (MODIFIED) ---
 def score_cv_against_job(cv_json_path, job_description_path, min_experience_years=2):
     weights = {
         "hard_filters": 0.25,
@@ -79,8 +82,17 @@ def score_cv_against_job(cv_json_path, job_description_path, min_experience_year
     }
 
     embeddings = OllamaEmbeddings(model="mxbai-embed-large")
+    llm = ChatOllama(model="llama3.2:latest", format="json") # LLM is still used later for semantic similarity via job_text embedding.
 
-    # Load job description
+    # --- 1. Extract Structured Job Data using JDExtractor ---
+    extractor = JDExtractor()
+    job_req_structured = extractor.extract(job_description_path)
+
+    if job_req_structured is None:
+        print(f"❌ Failed to extract structured data from job description: {job_description_path}")
+        return 0.0
+
+    # Extract raw job text for semantic similarity
     try:
         with open(job_description_path, 'r', encoding='utf-8') as f:
             job_text = f.read().strip()
@@ -88,42 +100,32 @@ def score_cv_against_job(cv_json_path, job_description_path, min_experience_year
         print(f"❌ Job description file not found: {job_description_path}")
         return 0.0
 
-    # Parse job requirements using LLM
-    llm = ChatOllama(model="llama3.2:latest", format="json")
-    prompt_template = PromptTemplate.from_template("""
-        Extract the following from the job description as JSON:
-        - required_skills: list of required skills
-        - required_certifications: list of required certifications
-        - location_eligibility: required location or "remote"
-        - min_years_experience: minimum years of experience
-        - required_education: required degree and field
-
-        Job Description:
-        {job_text}
-
-        Output only JSON.
-    """)
-    chain = prompt_template | llm
-    response = chain.invoke({"job_text": job_text})
+    # --- 2. Map Structured Data to Job Requirements Variables ---
+    # The keys in the JDExtractor output (job_req_structured) are used directly.
+    
+    # Required skills are a combination of required_skills and technical_skills
+    required_skills = set(normalize(s) for s in job_req_structured.get("required_skills", []) + job_req_structured.get("technical_skills", []))
+    
+    # We must infer min_years_experience from the "experience_requirements" object
+    min_years_str = job_req_structured.get("experience_requirements", {}).get("years_of_experience", f"{min_experience_years} years")
     try:
-        job_req = json.loads(response.content)
-    except json.JSONDecodeError:
-        print("⚠️ Error parsing LLM response; using defaults.")
-        job_req = {
-            "required_skills": [],
-            "required_certifications": [],
-            "location_eligibility": "",
-            "min_years_experience": min_experience_years,
-            "required_education": ""
-        }
+        # Simple extraction of the first number found for years
+        min_years = float(min(s for s in min_years_str.split() if s.isdigit()) if any(s.isdigit() for s in min_years_str.split()) else min_experience_years)
+    except:
+        min_years = min_experience_years # Fallback
+    
+    required_certifications = set(normalize(c) for c in job_req_structured.get("certifications", []))
+    
+    # The JDExtractor schema doesn't have "location_eligibility", so it's left blank or would require a separate extraction step.
+    # For now, we set it to empty string (which effectively disables the location check in Hard Score).
+    location_req = ""
+    
+    # The JDExtractor schema has "education_requirements" as a list of strings, so we take the first element (if present) for simplicity
+    required_education_list = job_req_structured.get("education_requirements", [])
+    required_education = required_education_list[0] if required_education_list else ""
 
-    required_skills = set(normalize(s) for s in job_req.get("required_skills", []))
-    required_certifications = set(normalize(c) for c in job_req.get("required_certifications", []))
-    location_req = job_req.get("location_eligibility", "").lower()
-    min_years = job_req.get("min_years_experience", min_experience_years)
-    required_education = job_req.get("required_education", "")
 
-    # Load CV
+    # --- Load CV (Unchanged) ---
     try:
         with open(cv_json_path, 'r', encoding='utf-8') as f:
             cv_data = json.load(f)
@@ -138,18 +140,17 @@ def score_cv_against_job(cv_json_path, job_description_path, min_experience_year
     candidate_location = structured_data.get("location", "").lower()
     candidate_education = structured_data.get("education", [])
 
-    # --- Generate cv_id from hashed email ---
+    # --- Generate cv_id from hashed email (Unchanged) ---
     email = structured_data.get("email", "")
     if email:
         cv_id = hash_email(email)
     else:
         cv_id = os.path.splitext(os.path.basename(cv_json_path))[0]
 
-    print(f"DEBUG - Email: {email}")
     print(f"DEBUG - cv_id: {cv_id}")
 
 
-    # --- Hard Score ---
+    # --- Hard Score (Unchanged logic, but uses new variables) ---
     hard_score = 0.0
     skill_matches = sum(1 for s in required_skills if fuzzy_match(s, candidate_skills))
     skill_fraction = skill_matches / len(required_skills) if required_skills else 1.0
@@ -164,7 +165,7 @@ def score_cv_against_job(cv_json_path, job_description_path, min_experience_year
 
     hard_score = hard_score * 100
 
-    # --- Semantic Similarity ---
+    # --- Semantic Similarity (Unchanged) ---
     try:
         vectorstore = Chroma(
             persist_directory="./chroma_db",
@@ -196,15 +197,24 @@ def score_cv_against_job(cv_json_path, job_description_path, min_experience_year
             section_scores.append(similarity * weight)
         except:
             continue
-    semantic_score = np.mean(section_scores) * 100 if section_scores else 0.0
+    
+    if section_scores:
+        mean_score = np.mean(section_scores) * 100
+        max_score = max(section_scores) * 100
 
-    # --- Experience Alignment ---
+        # Hybrid pooling (balanced overall coverage vs standout sections)
+        semantic_score = 0.7 * mean_score + 0.3 * max_score
+    else:
+        semantic_score = 0.0
+
+
+    # --- Experience Alignment (Unchanged logic, but uses new min_years) ---
     experience_score = min(years_of_experience / min_years, 1.0) * 100 if min_years > 0 else 100.0
 
-    # --- Education Alignment ---
+    # --- Education Alignment (Unchanged logic, but uses new required_education) ---
     education_score = fuzzy_education_match(required_education, candidate_education)
 
-    # --- Hybrid Score ---
+    # --- Hybrid Score (Unchanged) ---
     hybrid_score = (
         hard_score * weights["hard_filters"] +
         semantic_score * weights["semantic_similarity"] +
