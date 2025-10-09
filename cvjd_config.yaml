@@ -1,0 +1,27 @@
+section_mapping:
+  job_title: ["summary"]
+  required_skills: ["skills", "work_experience"]
+  preferred_skills: ["skills", "work_experience"]
+  required_qualifications: ["education", "years_of_experience", "work_experience"]
+  education_requirements: ["education"]
+  experience_requirements: ["work_experience", "years_of_experience"]
+  technical_skills: ["skills"]
+  soft_skills: ["soft_skills"]
+  certifications: ["certifications"]
+  responsibilities: ["work_experience", "projects"]
+
+section_weights:
+  required_skills: 0.30
+  preferred_skills: 0.05
+  required_qualifications: 0.05
+  education_requirements: 0.05
+  experience_requirements: 0.05
+  technical_skills: 0.05
+  soft_skills: 0.10
+  certifications: 0.10
+  responsibilities: 0.10
+  job_title: 0.05
+
+# Optional knobs
+# top_k_per_section: 5
+# model: mxbai-embed-large
