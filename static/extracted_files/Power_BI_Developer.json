@@ -1,0 +1,149 @@
+{
+  "CV_data": {
+    "structured_data": {
+      "name": "Enoch Kwadwo Aidoo",
+      "email": "aidooenochkwadwo@gmail.com",
+      "phone": "0240542834",
+      "summary": "A Data Analyst with about two years of professional experience specialized in transforming complex datasets into strategic business solutions. I've consistently delivered actionable insights that have driven key business decisions. Combining strong analytical skills with business acumen, I excel at identifying data patterns and translating them into clear, implementable strategies that solve real-world challenges.",
+      "years_of_experience": 1.92,
+      "work_experience": [
+        {
+          "company": "Really Great Tech",
+          "title": "Data Analytics/AI/ML Engineer",
+          "location": "",
+          "start_date": "November 2023",
+          "end_date": "October 2024",
+          "responsibilities": [
+            "Conducted Shapelet Analysis on trained machine learning models to interpret performance patterns and identify opportunities for optimization in the Theta Tech Al project.",
+            "Created a dynamic Google Sheets pivot table to track projects, employee assignments, and mentorship relationships for improved team visibility."
+          ]
+        },
+        {
+          "company": "Freelancer (ALX venturers)",
+          "title": "Data Scientist",
+          "location": "",
+          "start_date": "September 2024",
+          "end_date": "Present",
+          "responsibilities": [
+            "Led a freelance team to analyze tourist consumer behavior using advanced data analytics techniques to uncover trends and patterns and built a predictive model to forecast revenue and optimize customer pricing strategies for a tourist agency."
+          ]
+        }
+      ],
+      "education": [
+        {
+          "degree": "Bachelor of Science",
+          "field_of_study": "Computer Science",
+          "institution": "KNUST",
+          "location": "Ghana",
+          "start_date": "",
+          "end_date": "2023"
+        }
+      ],
+      "skills": [
+        "Python",
+        "R",
+        "AWS",
+        "Microsoft Excel",
+        "Google Sheets",
+        "Power BI",
+        "SQL",
+        "NumPy",
+        "Pandas",
+        "Scikit-Learn",
+        "Matplotlib",
+        "Pytorch",
+        "Jupyter Notebook",
+        "Data Analysis",
+        "Classification Modeling",
+        "Deep Neural Networks",
+        "Regression Modeling",
+        "MLOps",
+        "Computer Vision",
+        "Natural Language Processing",
+        "Recommendation Systems",
+        "Dashboard Design & User Experience Optimization",
+        "Advanced DAX calculations and measures",
+        "Data modeling and relationship management",
+        "Power Query for data transformation",
+        "Cross-platform data integration"
+      ],
+      "soft_skills": [
+        "Curiosity",
+        "Problem Solving",
+        "System Understanding",
+        "Technical Skills",
+        "Analytical Thinking",
+        "Problem Solving Skills",
+        "Teamwork",
+        "Initiative and Self-motivation",
+        "Discipline and Resilient"
+      ],
+      "certifications": [
+        {
+          "name": "ALX Data Science",
+          "issuing_organization": "ALX",
+          "date": "June 2025"
+        },
+        {
+          "name": "Google Data Analytics Professional Certificate",
+          "issuing_organization": "Google",
+          "date": "Oct 2021"
+        },
+        {
+          "name": "AWS Machine Learning Foundation",
+          "issuing_organization": "AWS",
+          "date": "Present"
+        },
+        {
+          "name": "Machine Learning (by Andrew Ng)",
+          "issuing_organization": "Stanford University on Coursera",
+          "date": "Present"
+        },
+        {
+          "name": "AWS Certified Cloud Practitioner",
+          "issuing_organization": "AWS",
+          "date": "Aug 2025"
+        },
+        {
+          "name": "AWS Certified Solutions Architect",
+          "issuing_organization": "AWS",
+          "date": "Present"
+        }
+      ],
+      "projects": [
+        {
+          "name": "Leveraged SQL and Power BI skills to design interactive dashboards",
+          "description": "Leveraged SQL and Power BI skills to design interactive dashboards that visualized complex data patterns, generating actionable insights for downstream machine learning algorithms and business decision-making.",
+          "technologies": [
+            "SQL",
+            "Power BI"
+          ]
+        },
+        {
+          "name": "Analyzed past market data and built a predictive model",
+          "description": "Analyzed past market data and built a predictive model for quantitative finance with a validation MSE of about 0.998 to improve risk forecasting.",
+          "technologies": []
+        },
+        {
+          "name": "Led SQL-based analysis of 60,000+ water infrastructure records",
+          "description": "Led SQL-based analysis of 60,000+ water infrastructure records to identify critical gaps in community water access, utilizing advanced SQL functions and data aggregation techniques to deliver actionable recommendations for infrastructure improvements and resource allocation.",
+          "technologies": [
+            "SQL"
+          ]
+        },
+        {
+          "name": "Built stakeholder-driven Power BI dashboards",
+          "description": "Built stakeholder-driven Power BI dashboards with advanced DAX calculations and multi-level drill-down functionality to track water project progress, budget performance, and community impact across national, provincial, and local levels.",
+          "technologies": [
+            "Power BI",
+            "DAX"
+          ]
+        }
+      ],
+      "languages": [],
+      "hobbies": [],
+      "other": ""
+    },
+    "format": "structured_json"
+  }
+}
