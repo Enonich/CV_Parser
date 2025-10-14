@@ -31,28 +31,28 @@ class CVDataInserter:
     def connect_to_database(self):
         """Establish connection to MongoDB database"""
         try:
-            logger.info("🔌 Connecting to MongoDB...")
+            logger.info("Connecting to MongoDB...")
             self.client = MongoClient(
                 self.connection_string,
                 serverSelectionTimeoutMS=5000,
                 connectTimeoutMS=10000,
                 socketTimeoutMS=0
             )
-            self.client.admin.command('ping')  # Test connection
-            logger.info("✅ Connection established.")
+            self.client.admin.command('ping')
+            logger.info("Connection established.")
 
             self.db = self.client[self.db_name]
             self.collection = self.db[self.collection_name]
 
             return True
         except ServerSelectionTimeoutError:
-            logger.error("❌ MongoDB server not available.")
+            logger.error("MongoDB server not available.")
             return False
         except ConnectionFailure:
-            logger.error("❌ Failed to connect to MongoDB.")
+            logger.error("Failed to connect to MongoDB.")
             return False
         except Exception as e:
-            logger.error(f"❌ Unexpected error: {e}")
+            logger.error(f"Unexpected error: {e}")
             return False
 
     def generate_cv_id(self, email=None, phone=None):
@@ -68,126 +68,105 @@ class CVDataInserter:
 
     def load_json_file(self, file_path):
         """Load and validate JSON file"""
-        logger.info(f"📂 Loading JSON file: {file_path}")
         try:
             file_path = Path(file_path)
             if not file_path.exists():
-                logger.error(f"❌ File not found: {file_path}")
+                logger.error(f"File not found: {file_path}")
                 return None
 
             file_size = file_path.stat().st_size
             if file_size == 0:
-                logger.error(f"❌ File is empty: {file_path}")
+                logger.error(f"File is empty: {file_path}")
                 return None
-            if file_size > 50 * 1024 * 1024:
-                logger.warning(f"⚠️ Large file detected ({file_size} bytes).")
 
             with open(file_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
 
-            # Extract the structured CV data from the nested structure
             cv_data = data['CV_data']['structured_data']
-            logger.info("✅ JSON file loaded and CV data extracted successfully.")
             return cv_data
         except KeyError as e:
-            logger.error(f"❌ Expected structure not found: {e}")
+            logger.error(f"Expected structure not found: {e}")
             return None
         except Exception as e:
-            logger.error(f"❌ Error loading JSON: {e}")
+            logger.error(f"Error loading JSON: {e}")
             return None
 
     def insert_cv_data(self, data):
         """Insert single CV using hashed email or phone as _id"""
-        logger.info("📝 Checking and inserting CV document...")
         try:
-            # Get email or phone for identification
             email = data.get('email', '').strip() if data.get('email') else None
             phone = data.get('phone', '').strip() if data.get('phone') else None
             
-            # Validate that at least one identifier exists
             if not email and not phone:
-                logger.error("❌ Either email or phone field is required")
+                logger.error("Either email or phone field is required")
                 return False
             
-            # Generate hashed identifier as the _id
             cv_id = self.generate_cv_id(email=email, phone=phone)
             identifier_used = email if email else phone
             identifier_type = "email" if email else "phone"
             
-            # Check if CV already exists
             existing_cv = self.collection.find_one({'_id': cv_id})
             if existing_cv:
-                logger.warning(f"⚠️ CV already exists for {identifier_type}: {identifier_used} (cv_id: {cv_id})")
+                logger.warning(f"CV already exists for {identifier_type}: {identifier_used}")
                 return False
             
-            # Add metadata
             data['_id'] = cv_id
             data['inserted_at'] = datetime.now(UTC)
             data['version'] = '1.0'
 
-            # Insert the document
             result = self.collection.insert_one(data)
-            logger.info(f"✅ CV inserted successfully with _id: {result.inserted_id} (using {identifier_type}: {identifier_used})")
+            logger.info(f"CV inserted successfully (using {identifier_type}: {identifier_used})")
             return True
             
         except DuplicateKeyError:
-            logger.warning(f"⚠️ Duplicate CV detected ({identifier_type}: {identifier_used})")
+            logger.warning(f"Duplicate CV detected")
             return False
         except PyMongoError as e:
-            logger.error(f"❌ MongoDB insert failed: {e}")
+            logger.error(f"MongoDB insert failed: {e}")
             return False
         except Exception as e:
-            logger.error(f"❌ Unexpected error: {e}")
+            logger.error(f"Unexpected error: {e}")
             return False
 
     def insert_many_cvs(self, data_list):
         """Insert multiple CVs"""
-        logger.info(f"📝 Batch inserting {len(data_list)} CV documents...")
+        logger.info(f"Batch inserting {len(data_list)} CV documents...")
         inserted_count = 0
         skipped_count = 0
         
         try:
             for d in data_list:
-                # Get email or phone for identification
                 email = d.get('email', '').strip() if d.get('email') else None
                 phone = d.get('phone', '').strip() if d.get('phone') else None
                 
-                # Validate that at least one identifier exists
                 if not email and not phone:
-                    logger.warning(f"⚠️ Skipping document without email or phone: {d.get('name', 'Unknown')}")
                     skipped_count += 1
                     continue
                 
-                # Generate hashed identifier as the _id
                 cv_id = self.generate_cv_id(email=email, phone=phone)
                 identifier_used = email if email else phone
                 identifier_type = "email" if email else "phone"
                 
-                # Check if CV already exists
                 existing_cv = self.collection.find_one({'_id': cv_id})
                 if existing_cv:
-                    logger.warning(f"⚠️ CV already exists, skipping ({identifier_type}: {identifier_used})")
                     skipped_count += 1
                     continue
                 
-                # Add metadata
                 d['_id'] = cv_id
                 d['inserted_at'] = datetime.now(UTC)
                 d['version'] = '1.0'
                 
                 try:
                     self.collection.insert_one(d)
-                    logger.info(f"✅ Inserted CV using {identifier_type}: {identifier_used}")
                     inserted_count += 1
                 except DuplicateKeyError:
-                    logger.warning(f"⚠️ Duplicate detected, skipping ({identifier_type}: {identifier_used})")
                     skipped_count += 1
             
-            logger.info(f"✅ Batch insert completed. Inserted: {inserted_count}, Skipped: {skipped_count}")
+            logger.info(f"Batch insert completed. Inserted: {inserted_count}, Skipped: {skipped_count}")
             return True
             
         except Exception as e:
-            logger.error(f"❌ Unexpected batch insert error: {e}")
+            logger.error(f"Unexpected batch insert error: {e}")
             return False
 
     def close_connection(self):
@@ -195,13 +174,12 @@ class CVDataInserter:
         try:
             if self.client:
                 self.client.close()
-                logger.info("🔒 MongoDB connection closed.")
         except Exception as e:
-            logger.error(f"❌ Error closing connection: {e}")
+            logger.error(f"Error closing connection: {e}")
 
     def process_cv_file(self, file_path):
         """Complete process for a single CV file"""
-        logger.info("🚀 Starting CV file processing...")
+        logger.info("Starting CV file processing...")
         try:
             if not self.connect_to_database():
                 return False
@@ -212,13 +190,64 @@ class CVDataInserter:
             return success
         finally:
             self.close_connection()
-            logger.info("🏁 CV file processing finished.")
 
+    def get_all_cvs(self):
+        """Get all CVs from MongoDB collection."""
+        try:
+            if not self.connect_to_database():
+                logger.error("Failed to connect to MongoDB")
+                return []
+            
+            # Get all documents from the collection
+            cursor = self.collection.find({})
+            cvs = []
+            
+            for document in cursor:
+                # Convert ObjectId to string for JSON serialization
+                document['_id'] = str(document['_id'])
+                cvs.append(document)
+            
+            logger.info(f"Retrieved {len(cvs)} CVs from MongoDB")
+            return cvs
+            
+        except Exception as e:
+            logger.error(f"Error retrieving CVs from MongoDB: {e}")
+            return []
+        finally:
+            self.close_connection()
 
+    def check_cv_exists(self, email=None, phone=None):
+        """Check if a CV already exists in the database based on email or phone."""
+        try:
+            if not self.connect_to_database():
+                logger.error("Failed to connect to MongoDB")
+                return None
+            
+            # Generate the CV ID to check
+            cv_id = self.generate_cv_id(email=email, phone=phone)
+            
+            # Check if document exists
+            existing_doc = self.collection.find_one({"cv_id": cv_id})
+            
+            if existing_doc:
+                existing_doc['_id'] = str(existing_doc['_id'])
+                logger.info(f"CV with ID {cv_id} already exists in database")
+                return existing_doc
+            else:
+                logger.info(f"CV with ID {cv_id} not found in database")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error checking CV existence: {e}")
+            return None
+        finally:
+            self.close_connection()
+
+            
 # Example usage:
 if __name__ == "__main__":
-    document_path = './extracted_files/Power_BI_Developer.json'
-    mongo_inserter = CVDataInserter()
+    document_path = './extracted_files/data_analyst_jd.json'
+    mongo_inserter = CVDataInserter(db_name='JD', collection_name="JD_collection")
     success = mongo_inserter.process_cv_file(document_path)
     
     if success:
