@@ -1,0 +1,88 @@
+{
+  "CV_data": {
+    "structured_data": {
+      "name": "Evans Kwarteng",
+      "email": "evansagyapong33@gmail.com",
+      "phone": "0534577886 / 0501317555",
+      "summary": "Detail-oriented and adaptable graduate with hands-on experience in agriculture, project management, and forest resource technology. Passionate about innovative and sustainable solutions, with strong problem-solving skills and a collaborative mindset.",
+      "years_of_experience": 2.25,
+      "work_experience": [
+        {
+          "company": "BEMCOM YOUTH ENTERPRISES",
+          "title": "INDUSTRIAL ATTACHMENT",
+          "location": "Techiman",
+          "start_date": "Jan 2023",
+          "end_date": "May 2023",
+          "responsibilities": [
+            "Developed and implemented efficient resources allocation strategies",
+            "Led and supervised sales team, and the day-to-day sales operations",
+            "Sold and distributed the product",
+            "Served existing customers and acquired new customers"
+          ]
+        },
+        {
+          "company": "FORESTRY COMMISSION",
+          "title": "NATIONAL SERVICE",
+          "location": "Debiso",
+          "start_date": "Nov 2023",
+          "end_date": "Oct 2024",
+          "responsibilities": [
+            "Engaged in monitoring exercises, preventing illegal logging by chain saw operators and wildfires as well",
+            "Inspected vehicles transporting logs for their legal documents",
+            "Engaged in enumeration and mensuration practices which is very supportive to the team",
+            "Engaged in pre-felling and post-felling activities"
+          ]
+        },
+        {
+          "company": "MARANATHA ADVENTIST PREPARATORY SCHOOL (MAPS)",
+          "title": "PRIMARY SCHOOL TEACHER",
+          "location": "",
+          "start_date": "Oct 2018",
+          "end_date": "Oct 2019",
+          "responsibilities": [
+            "Taught students in the lower primary",
+            "Served as a secretary for the school board"
+          ]
+        }
+      ],
+      "education": [
+        {
+          "degree": "Bachelor of Science",
+          "field_of_study": "Forest Resources Technology",
+          "institution": "KNUST",
+          "location": "Ghana",
+          "start_date": "",
+          "end_date": "2023"
+        }
+      ],
+      "skills": [
+        "Microsoft Excel",
+        "Google Sheets",
+        "SPSS",
+        "Data Analysis",
+        "Data Visualization",
+        "Forest Inventory and Measurements"
+      ],
+      "soft_skills": [
+        "Curiosity",
+        "Analytical Thinking",
+        "Problem Solving Skills",
+        "Teamwork",
+        "Initiative and Self-motivation",
+        "Discipline and Resilient"
+      ],
+      "certifications": [],
+      "projects": [
+        {
+          "name": "Mushroom production project",
+          "description": "Designed and executed a comprehensive mushroom cultivation system. Developed and followed a structured cultivation plan, ensuring optimal environmental conditions for growth. Managed the harvesting and post-harvest processing of mushrooms for consumption and secondary applications. Acquired practical experience in mycology, including substrate formulation, pest control, and environmental monitoring.",
+          "technologies": ""
+        }
+      ],
+      "languages": [],
+      "hobbies": [],
+      "other": "Field Officer, Sefwi Bekwai, Ghana"
+    },
+    "format": "structured_json"
+  }
+}

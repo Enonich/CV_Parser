@@ -1,0 +1,57 @@
+{
+  "structured_data": {
+    "job_title": "Field and Forest Resource Officer",
+    "required_skills": [
+      "Analytical skills",
+      "Problem-solving skills",
+      "Teamwork",
+      "Communication skills",
+      "Organizational abilities",
+      "Adaptability",
+      "Forest inventory",
+      "Field data collection",
+      "Environmental monitoring",
+      "Data analysis",
+      "Reporting"
+    ],
+    "required_qualifications": [
+      "Understanding of sustainable forest management principles",
+      "Understanding of field operations"
+    ],
+    "preferred_skills": [
+      "Data visualization",
+      "Forest measurement techniques"
+    ],
+    "education_requirements": [
+      "Bachelor's degree in Forest Resources Technology",
+      "Bachelor's degree in Environmental Science",
+      "Bachelor's degree in Natural Resource Management"
+    ],
+    "experience_requirements": {
+      "years_of_experience": null,
+      "specific_experience": "Hands-on experience in forest inventory, field data collection, or environmental monitoring."
+    },
+    "technical_skills": [
+      "Microsoft Excel",
+      "Google Sheets",
+      "SPSS"
+    ],
+    "soft_skills": [
+      "Self-motivated",
+      "Disciplined",
+      "Resilient"
+    ],
+    "certifications": [],
+    "responsibilities": [
+      "Conduct field surveys, forest inventories, and resource assessments to gather accurate environmental data.",
+      "Monitor forest reserves to prevent illegal logging, wildfires, and other environmental threats.",
+      "Support pre-felling and post-felling operations, ensuring adherence to forestry regulations.",
+      "Collect, analyze, and interpret forestry data to support planning and decision-making.",
+      "Inspect forest products and transport operations for compliance with legal and sustainability standards.",
+      "Participate in community outreach programs promoting sustainable forest use and conservation.",
+      "Prepare technical reports and documentation based on field findings.",
+      "Collaborate with forestry teams, government agencies, and local communities to implement resource management strategies."
+    ]
+  },
+  "format": "structured_json"
+}
