@@ -2,10 +2,9 @@
   "CV_data": {
     "structured_data": {
       "name": "Enoch Kwadwo Aidoo",
-      "email": "aidooenochkwadwo@gmail.com",
+      "email": "aidoenochkwadwo@gmail.com",
       "phone": "0240542834",
       "summary": "A Data Analyst with about two years of professional experience specialized in transforming complex datasets into strategic business solutions. I've consistently delivered actionable insights that have driven key business decisions. Combining strong analytical skills with business acumen, I excel at identifying data patterns and translating them into clear, implementable strategies that solve real-world challenges.",
-      "years_of_experience": 1.92,
       "work_experience": [
         {
           "company": "Really Great Tech",
@@ -14,7 +13,7 @@
           "start_date": "November 2023",
           "end_date": "October 2024",
           "responsibilities": [
-            "Conducted Shapelet Analysis on trained machine learning models to interpret performance patterns and identify opportunities for optimization in the Theta Tech Al project.",
+            "Conducted Shapelet Analysis on trained machine learning models to interpret performance patterns and identify opportunities for optimization in the Theta Tech AI project.",
             "Created a dynamic Google Sheets pivot table to track projects, employee assignments, and mentorship relationships for improved team visibility."
           ]
         },
@@ -73,7 +72,6 @@
         "System Understanding",
         "Technical Skills",
         "Analytical Thinking",
-        "Problem Solving Skills",
         "Teamwork",
         "Initiative and Self-motivation",
         "Discipline and Resilient"
@@ -87,15 +85,15 @@
         {
           "name": "Google Data Analytics Professional Certificate",
           "issuing_organization": "Google",
-          "date": "Oct 2021"
+          "date": "Present"
         },
         {
           "name": "AWS Machine Learning Foundation",
           "issuing_organization": "AWS",
-          "date": "Present"
+          "date": "Oct 2021"
         },
         {
-          "name": "Machine Learning (by Andrew Ng)",
+          "name": "Machine Learning",
           "issuing_organization": "Stanford University on Coursera",
           "date": "Present"
         },
@@ -112,27 +110,28 @@
       ],
       "projects": [
         {
-          "name": "Leveraged SQL and Power BI skills to design interactive dashboards",
+          "name": "Interactive Dashboards for Machine Learning Algorithms",
           "description": "Leveraged SQL and Power BI skills to design interactive dashboards that visualized complex data patterns, generating actionable insights for downstream machine learning algorithms and business decision-making.",
           "technologies": [
             "SQL",
-            "Power BI"
+            "Power BI",
+            "Machine Learning"
           ]
         },
         {
-          "name": "Analyzed past market data and built a predictive model",
+          "name": "Predictive Model for Quantitative Finance",
           "description": "Analyzed past market data and built a predictive model for quantitative finance with a validation MSE of about 0.998 to improve risk forecasting.",
           "technologies": []
         },
         {
-          "name": "Led SQL-based analysis of 60,000+ water infrastructure records",
+          "name": "SQL-based Analysis for Water Infrastructure",
           "description": "Led SQL-based analysis of 60,000+ water infrastructure records to identify critical gaps in community water access, utilizing advanced SQL functions and data aggregation techniques to deliver actionable recommendations for infrastructure improvements and resource allocation.",
           "technologies": [
             "SQL"
           ]
         },
         {
-          "name": "Built stakeholder-driven Power BI dashboards",
+          "name": "Stakeholder-Driven Power BI Dashboards",
           "description": "Built stakeholder-driven Power BI dashboards with advanced DAX calculations and multi-level drill-down functionality to track water project progress, budget performance, and community impact across national, provincial, and local levels.",
           "technologies": [
             "Power BI",
@@ -142,8 +141,10 @@
       ],
       "languages": [],
       "hobbies": [],
-      "other": ""
-    },
-    "format": "structured_json"
+      "other": "",
+      "years_of_experience": 1.92,
+      "company_name": "Really Great Tech",
+      "job_title": "Data Analyst"
+    }
   }
 }

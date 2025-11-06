@@ -3,13 +3,12 @@
     "structured_data": {
       "name": "Evans Kwarteng",
       "email": "evansagyapong33@gmail.com",
-      "phone": "0534577886 / 0501317555",
+      "phone": "0534577886",
       "summary": "Detail-oriented and adaptable graduate with hands-on experience in agriculture, project management, and forest resource technology. Passionate about innovative and sustainable solutions, with strong problem-solving skills and a collaborative mindset.",
-      "years_of_experience": 2.25,
       "work_experience": [
         {
           "company": "BEMCOM YOUTH ENTERPRISES",
-          "title": "INDUSTRIAL ATTACHMENT",
+          "title": "Industrial Attachment",
           "location": "Techiman",
           "start_date": "Jan 2023",
           "end_date": "May 2023",
@@ -22,7 +21,7 @@
         },
         {
           "company": "FORESTRY COMMISSION",
-          "title": "NATIONAL SERVICE",
+          "title": "National Service",
           "location": "Debiso",
           "start_date": "Nov 2023",
           "end_date": "Oct 2024",
@@ -35,7 +34,7 @@
         },
         {
           "company": "MARANATHA ADVENTIST PREPARATORY SCHOOL (MAPS)",
-          "title": "PRIMARY SCHOOL TEACHER",
+          "title": "Primary School Teacher",
           "location": "",
           "start_date": "Oct 2018",
           "end_date": "Oct 2019",
@@ -49,8 +48,8 @@
         {
           "degree": "Bachelor of Science",
           "field_of_study": "Forest Resources Technology",
-          "institution": "KNUST",
-          "location": "Ghana",
+          "institution": "KNUST, Ghana",
+          "location": "",
           "start_date": "",
           "end_date": "2023"
         }
@@ -76,13 +75,15 @@
         {
           "name": "Mushroom production project",
           "description": "Designed and executed a comprehensive mushroom cultivation system. Developed and followed a structured cultivation plan, ensuring optimal environmental conditions for growth. Managed the harvesting and post-harvest processing of mushrooms for consumption and secondary applications. Acquired practical experience in mycology, including substrate formulation, pest control, and environmental monitoring.",
-          "technologies": ""
+          "technologies": []
         }
       ],
       "languages": [],
       "hobbies": [],
-      "other": "Field Officer, Sefwi Bekwai, Ghana"
-    },
-    "format": "structured_json"
+      "other": "",
+      "years_of_experience": 2.25,
+      "company_name": "Really Great Tech",
+      "job_title": "Machine Learning Engineer"
+    }
   }
 }
