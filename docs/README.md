@@ -74,6 +74,28 @@ Make sure you have the following installed:
 ### Search & Scoring
 - `POST /search-cvs/` - Search and score CVs against job description
 
+#### Per-Request Reranking
+Add a `rerank` boolean to the request body to override global configuration:
+
+Example body:
+```json
+{
+  "top_k_cvs": 5,
+  "show_details": true,
+  "rerank": true
+}
+```
+
+Behavior:
+* If `rerank` is provided it takes precedence over `search.rerank_enabled` in `config.yaml`.
+* If `rerank` is `true` but global reranking is disabled, the cross-encoder reranker is lazily initialized.
+* Response now includes a top-level `reranked` flag.
+* Each result contains:
+  - `vector_score`: base weighted similarity
+  - `cross_encoder_score`: pair semantic score (only if reranked & model available)
+  - `coverage_score`: heuristic coverage of JD sections matched
+  - `final_score`: fused score when reranked, otherwise equals `vector_score`
+
 ### Health Check
 - `GET /health` - API health status
 

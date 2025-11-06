@@ -1,0 +1,74 @@
+{
+  "structured_data": {
+    "job_title": "Data Analyst",
+    "required_skills": [
+      "Advanced SQL proficiency (complex queries, joins, window functions, and performance optimization)",
+      "Python or R for data manipulation, statistical analysis, and automation",
+      "Data visualization tools (Tableau, Power BI, or similar platforms)",
+      "Statistical analysis (hypothesis testing, regression analysis, A/B testing)",
+      "Excel/Google Sheets for advanced formulas, pivot tables, and data modeling",
+      "Strong problem-solving abilities with attention to detail",
+      "Experience with experimental design and statistical inference",
+      "Ability to work with ambiguous requirements and define analytical approaches",
+      "Understanding of business metrics and KPI development"
+    ],
+    "required_qualifications": [
+      "Bachelor's degree in Data Science, Statistics, Mathematics, Computer Science, or related analytical field",
+      "2-4 years of experience in data analysis, business intelligence, or related role",
+      "Experience working with large datasets and complex data structures"
+    ],
+    "preferred_skills": [
+      "Experience with cloud platforms (AWS, GCP, Azure) and their analytics services",
+      "Knowledge of machine learning concepts and applications",
+      "Familiarity with API integration and data extraction",
+      "Experience with version control systems (Git)",
+      "Previous experience in fintech, payments, or e-commerce industries",
+      "Understanding of customer analytics and behavioral segmentation",
+      "Knowledge of financial metrics and regulatory reporting requirements"
+    ],
+    "education_requirements": [
+      "Bachelor's degree in Data Science, Statistics, Mathematics, Computer Science, or related analytical field"
+    ],
+    "experience_requirements": {
+      "years_of_experience": "2-4 years",
+      "specific_experience": "data analysis, business intelligence, or related role; working with large datasets and complex data structures"
+    },
+    "technical_skills": [
+      "SQL (advanced proficiency, complex queries, joins, window functions, performance optimization)",
+      "Python",
+      "R",
+      "Tableau",
+      "Power BI",
+      "Excel",
+      "Google Sheets",
+      "AWS",
+      "GCP",
+      "Azure",
+      "API integration",
+      "Data extraction",
+      "Git"
+    ],
+    "soft_skills": [
+      "Excellent written and verbal communication skills",
+      "Experience presenting to executive-level stakeholders",
+      "Ability to work independently and manage multiple projects simultaneously",
+      "Strong collaboration skills in cross-functional team environments"
+    ],
+    "certifications": null,
+    "responsibilities": [
+      "Extract, clean, and analyze large datasets from multiple sources including databases, APIs, and third-party platforms",
+      "Create comprehensive reports and dashboards to track key performance indicators (KPIs) and business metrics",
+      "Perform statistical analysis to identify trends, patterns, and anomalies in business data",
+      "Develop automated reporting solutions to streamline regular business reviews",
+      "Partner with stakeholders across Marketing, Sales, Product, and Operations to understand analytical needs",
+      "Translate business questions into analytical frameworks and methodologies",
+      "Present findings and recommendations to senior leadership through clear visualizations and presentations",
+      "Monitor and analyze customer acquisition, retention, and lifetime value metrics",
+      "Ensure data quality and integrity across reporting systems",
+      "Document data sources, methodologies, and analytical processes",
+      "Collaborate with Engineering team to improve data collection and storage processes",
+      "Maintain and optimize existing SQL queries and data pipelines"
+    ]
+  },
+  "format": "structured_json"
+}

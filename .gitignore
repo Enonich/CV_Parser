@@ -1,2 +1,58 @@
-# Ignore the environment variables file
+# Environment variables
 .env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Data directories
+data/chroma_db*/
+data/CVs/
+data/extracted_files/
+*.sqlite3
+
+# Static uploaded files
+static/cvs/
+static/jds/
+static/extracted_files/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+notebooks/.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+~$*.docx
+
+# Logs
+*.log
+logs/
