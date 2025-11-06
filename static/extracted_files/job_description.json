@@ -1,7 +1,75 @@
 {
-  "document": {
-    "raw_content": "{\n  \"job_title\": \"Data Analyst\",\n  \"required_skills\": [\n    \"Advanced SQL proficiency (complex queries, joins, window functions, performance optimization)\",\n    \"Python for data manipulation, statistical analysis, and automation\",\n    \"R for data manipulation, statistical analysis, and automation\",\n    \"Data visualization\",\n    \"Statistical analysis (hypothesis testing, regression analysis, A/B testing)\",\n    \"Advanced Excel skills (advanced formulas, pivot tables, data modeling)\",\n    \"Advanced Google Sheets skills (advanced formulas, pivot tables, data modeling)\",\n    \"Strong problem-solving abilities with attention to detail\",\n    \"Experience with experimental design and statistical inference\",\n    \"Ability to work with ambiguous requirements and define analytical approaches\",\n    \"Understanding of business metrics and KPI development\"\n   \u0432\u0435],\n  \"required_qualifications\": null,\n  \"preferred_skills\": [\n    \"Experience with cloud platforms (AWS, GCP, Azure) and their analytics services\",\n    \"Knowledge of machine learning concepts and applications\",\n    \"Familiarity with API integration and data extraction\",\n    \"Experience with version control systems (Git)\",\n    \"Previous experience in fintech, payments, or e-commerce industries\",\n    \"Understanding of customer analytics and behavioral segmentation\",\n    \"Knowledge of financial metrics and regulatory reporting requirements\"\n  ],\n  \"education_requirements\": [\n    \"Bachelor's degree in Data Science, Statistics, Mathematics, Computer Science, or related analytical field\"\n  ],\n  \"experience_requirements\": {\n    \"years_of_experience\": \"2-4 years\",\n    \"specific_experience\": \"in data analysis, business intelligence, or related role, working with large datasets and complex data structures\"\n  },\n  \"technical_skills\": [\n    \"SQL\",\n    \"Python\",\n    \"R\",\n    \"Tableau\",\n    \"Power BI\",\n    \"Excel\",\n    \"Google Sheets\",\n    \"AWS\",\n    \"GCP\",\n    \"Azure\",\n    \"Machine learning concepts\",\n    \"API integration\",\n    \"Data extraction\",\n    \"Git\"\n  ],\n  \"soft_skills\": [\n    \"Excellent written and verbal communication skills\",\n    \"Experience presenting to executive-level stakeholders\",\n    \"Ability to work independently\",\n    \"Ability to manage multiple projects simultaneously\",\n    \"Strong collaboration skills in cross-functional team environments\"\n  ],\n  \"certifications\": null,\n  \"responsibilities\": [\n    \"Extract, clean, and analyze large datasets from multiple sources including databases, APIs, and third-party platforms\",\n    \"Create comprehensive reports and dashboards to track key performance indicators (KPIs) and business metrics\",\n    \"Perform statistical analysis to identify trends, patterns, and anomalies in business data\",\n    \"Develop automated reporting solutions to streamline regular business reviews\",\n    \"Partner with stakeholders across Marketing, Sales, Product, and Operations to understand analytical needs\",\n    \"Translate business questions into analytical frameworks and methodologies\",\n    \"Present findings and recommendations to senior leadership through clear visualizations and presentations\",\n    \"Monitor and analyze customer acquisition, retention, and lifetime value metrics\",\n    \"Ensure data quality and integrity across reporting systems\",\n    \"Document data sources, methodologies, and analytical processes\",\n    \"Collaborate with Engineering team to improve data collection and storage processes\",\n    \"Maintain and optimize existing SQL queries and data pipelines\"\n  ]\n}"
+  "structured_data": {
+    "job_title": "Data Analyst",
+    "required_skills": [
+      "Advanced SQL proficiency",
+      "Python for data manipulation, statistical analysis, and automation",
+      "R for data manipulation, statistical analysis, and automation",
+      "Data visualization",
+      "Statistical analysis (hypothesis testing, regression analysis, A/B testing)",
+      "Advanced Excel/Google Sheets skills (formulas, pivot tables, data modeling)",
+      "Strong problem-solving abilities with attention to detail",
+      "Experience with experimental design and statistical inference",
+      "Ability to work with ambiguous requirements and define analytical approaches",
+      "Understanding of business metrics and KPI development"
+    ],
+    "required_qualifications": [],
+    "preferred_skills": [
+      "Experience with cloud platforms (AWS, GCP, Azure) and their analytics services",
+      "Knowledge of machine learning concepts and applications",
+      "Familiarity with API integration and data extraction",
+      "Experience with version control systems (Git)",
+      "Previous experience in fintech, payments, or e-commerce industries",
+      "Understanding of customer analytics and behavioral segmentation",
+      "Knowledge of financial metrics and regulatory reporting requirements"
+    ],
+    "education_requirements": [
+      "Bachelor's degree in Data Science, Statistics, Mathematics, Computer Science, or related analytical field"
+    ],
+    "experience_requirements": {
+      "years_of_experience": "2-4 years",
+      "specific_experience": "data analysis, business intelligence, or related role; working with large datasets and complex data structures"
+    },
+    "technical_skills": [
+      "SQL",
+      "Python",
+      "R",
+      "Tableau",
+      "Power BI",
+      "Excel",
+      "Google Sheets",
+      "AWS",
+      "GCP",
+      "Azure",
+      "Machine learning",
+      "API integration",
+      "Data extraction",
+      "Git"
+    ],
+    "soft_skills": [
+      "Excellent written and verbal communication skills",
+      "Experience presenting to executive-level stakeholders",
+      "Ability to work independently and manage multiple projects simultaneously",
+      "Strong collaboration skills in cross-functional team environments"
+    ],
+    "certifications": [],
+    "responsibilities": [
+      "Extract, clean, and analyze large datasets from multiple sources including databases, APIs, and third-party platforms",
+      "Create comprehensive reports and dashboards to track key performance indicators (KPIs) and business metrics",
+      "Perform statistical analysis to identify trends, patterns, and anomalies in business data",
+      "Develop automated reporting solutions to streamline regular business reviews",
+      "Partner with stakeholders across Marketing, Sales, Product, and Operations to understand analytical needs",
+      "Translate business questions into analytical frameworks and methodologies",
+      "Present findings and recommendations to senior leadership through clear visualizations and presentations",
+      "Monitor and analyze customer acquisition, retention, and lifetime value metrics",
+      "Ensure data quality and integrity across reporting systems",
+      "Document data sources, methodologies, and analytical processes",
+      "Collaborate with Engineering team to improve data collection and storage processes",
+      "Maintain and optimize existing SQL queries and data pipelines"
+    ]
   },
-  "format": "json_parse_error",
-  "error": "Expecting ',' delimiter: line 15 column 4 (char 854)"
+  "company_name": "Really Great Tech",
+  "job_title": "Data Analyst",
+  "company_name_sanitized": "really_great_tech",
+  "job_title_sanitized": "data_analyst"
 }

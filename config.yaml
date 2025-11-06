@@ -1,0 +1,56 @@
+# MongoDB Configuration
+mongodb:
+  connection_string: "mongodb://localhost:27017/"
+  cv_db_name: "CV"
+  cv_collection_name: "CV_Data"
+  jd_db_name: "JobDescriptions"
+  jd_collection_name: "JD_Data"
+
+# Embedding Configuration
+embedding:
+  model: "mxbai-embed-large"
+
+# Chroma Vector Store Configuration
+chroma:
+  cv_persist_dir: "./chroma_db"
+  jd_persist_dir: "./jd_chroma_db"
+  cv_collection_name: "cv_sections"
+  jd_collection_name: "job_descriptions"
+
+# Search Configuration
+search:
+  top_k_per_section: 5
+  top_k_cvs: 5
+  enable_cross_encoder: true
+  cross_encoder_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
+  enable_bm25: true  # Enable BM25 keyword-based scoring
+  # Hybrid scoring weights (must sum to 1.0)
+  vector_weight: 0.4      # Weight for semantic vector similarity
+  bm25_weight: 0.3        # Weight for BM25 keyword matching
+  cross_encoder_weight: 0.3  # Weight for cross-encoder reranking
+
+# Section Mapping for CV-JD Matching
+section_mapping:
+  job_title: ["summary"]
+  required_skills: ["skills", "work_experience"]
+  preferred_skills: ["skills", "work_experience"]
+  required_qualifications: ["education", "years_of_experience", "work_experience"]
+  education_requirements: ["education"]
+  experience_requirements: ["work_experience", "years_of_experience"]
+  technical_skills: ["skills"]
+  soft_skills: ["soft_skills"]
+  certifications: ["certifications"]
+  responsibilities: ["work_experience", "projects"]
+
+# Section Weights for Scoring
+section_weights:
+  required_skills: 0.30
+  preferred_skills: 0.05
+  required_qualifications: 0.05
+  education_requirements: 0.05
+  experience_requirements: 0.05
+  technical_skills: 0.05
+  soft_skills: 0.10
+  certifications: 0.10
+  responsibilities: 0.10
+  job_title: 0.05

@@ -2,21 +2,24 @@
   "structured_data": {
     "job_title": "Field and Forest Resource Officer",
     "required_skills": [
-      "Analytical skills",
-      "Problem-solving skills",
-      "Teamwork",
-      "Communication skills",
-      "Organizational abilities",
-      "Adaptability",
       "Forest inventory",
       "Field data collection",
       "Environmental monitoring",
-      "Data analysis",
-      "Reporting"
+      "Sustainable forest management principles",
+      "Field operations",
+      "Adherence to forestry regulations",
+      "Forestry data analysis and interpretation",
+      "Compliance with legal and sustainability standards",
+      "Community outreach",
+      "Technical report preparation",
+      "Documentation based on field findings",
+      "Resource management strategies implementation"
     ],
     "required_qualifications": [
-      "Understanding of sustainable forest management principles",
-      "Understanding of field operations"
+      "Bachelor's degree in Forest Resources Technology, Environmental Science, Natural Resource Management, or a related field",
+      "Hands-on experience in forest inventory, field data collection, or environmental monitoring",
+      "Proficiency in Microsoft Excel, Google Sheets, and SPSS for data analysis and reporting",
+      "Strong understanding of sustainable forest management principles and field operations"
     ],
     "preferred_skills": [
       "Data visualization",
@@ -25,21 +28,32 @@
     "education_requirements": [
       "Bachelor's degree in Forest Resources Technology",
       "Bachelor's degree in Environmental Science",
-      "Bachelor's degree in Natural Resource Management"
+      "Bachelor's degree in Natural Resource Management",
+      "Bachelor's degree in a related field"
     ],
     "experience_requirements": {
       "years_of_experience": null,
-      "specific_experience": "Hands-on experience in forest inventory, field data collection, or environmental monitoring."
+      "specific_experience": "Hands-on experience in forest inventory, field data collection, or environmental monitoring. Previous work with forestry or environmental organizations. Experience leading or contributing to agricultural or sustainability projects. Knowledge of data visualization and forest measurement techniques."
     },
     "technical_skills": [
       "Microsoft Excel",
       "Google Sheets",
-      "SPSS"
+      "SPSS",
+      "Data analysis",
+      "Data visualization",
+      "Forest measurement techniques"
     ],
     "soft_skills": [
+      "Strong analytical skills",
+      "Problem-solving skills",
+      "Excellent teamwork",
+      "Excellent communication",
+      "Excellent organizational abilities",
       "Self-motivated",
       "Disciplined",
-      "Resilient"
+      "Resilient under field conditions",
+      "Capable of adapting to changing environments",
+      "Capable of managing multiple field tasks efficiently"
     ],
     "certifications": [],
     "responsibilities": [
@@ -53,5 +67,6 @@
       "Collaborate with forestry teams, government agencies, and local communities to implement resource management strategies."
     ]
   },
-  "format": "structured_json"
+  "company_name": "Ebits",
+  "job_title": "Data Analyst"
 }

@@ -5,7 +5,6 @@
       "email": "aidooenochkwadwo@gmail.com",
       "phone": "0240542834",
       "summary": "A Data Analyst with about two years of professional experience specialized in transforming complex datasets into strategic business solutions. I've consistently delivered actionable insights that have driven key business decisions. Combining strong analytical skills with business acumen, I excel at identifying data patterns and translating them into clear, implementable strategies that solve real-world challenges.",
-      "years_of_experience": 1.92,
       "work_experience": [
         {
           "company": "Really Great Tech",
@@ -33,7 +32,7 @@
       "education": [
         {
           "degree": "Bachelor of Science",
-          "field_of_study": "Computer Science (Included one year course on Management Studies)",
+          "field_of_study": "Computer Science",
           "institution": "KNUST",
           "location": "Ghana",
           "start_date": "",
@@ -68,10 +67,10 @@
         "System Understanding",
         "Technical Skills",
         "Analytical Thinking",
-        "Problem Solving Skills",
         "Teamwork",
         "Initiative and Self-motivation",
-        "Discipline and Resilient"
+        "Discipline",
+        "Resilient"
       ],
       "certifications": [
         {
@@ -96,7 +95,7 @@
         },
         {
           "name": "Machine Learning",
-          "issuing_organization": "Stanford University",
+          "issuing_organization": "Stanford University on Coursera",
           "date": "Sep 2025"
         },
         {
@@ -117,26 +116,26 @@
       ],
       "projects": [
         {
-          "name": "Water Access Data Analysis",
+          "name": "",
           "description": "Conducted advanced Excel analysis on water access datasets, applying data cleaning, formulas, statistical functions, and pivot tables. Designed visualizations (stacked bar charts, box & whisker plots) to uncover disparities across urban/rural areas and income groups, supporting evidence-based resource allocation.",
           "technologies": [
             "Excel"
           ]
         },
         {
-          "name": "Predictive Model for Quantitative Finance",
+          "name": "",
           "description": "Built a predictive model for quantitative finance using historical market data, achieving a validation MSE of 0.998. The model improved risk forecasting accuracy and provided actionable insights for financial decision-making.",
           "technologies": []
         },
         {
-          "name": "SQL-based Water Infrastructure Analysis",
+          "name": "",
           "description": "Led SQL-based analysis of 60,000+ water infrastructure records, using advanced queries and aggregation techniques to identify critical gaps in community water access. Delivered data-driven recommendations that guided infrastructure planning and resource distribution.",
           "technologies": [
             "SQL"
           ]
         },
         {
-          "name": "Power BI Dashboards for Project Monitoring",
+          "name": "",
           "description": "Developed stakeholder-driven Power BI dashboards with advanced DAX calculations and multi-level drill-downs to monitor project progress, budgets, and impact. The dashboards improved transparency, performance tracking, and decision-making at national, provincial, and local levels.",
           "technologies": [
             "Power BI",
@@ -146,8 +145,10 @@
       ],
       "languages": [],
       "hobbies": [],
-      "other": "Kumasi, Ghana"
-    },
-    "format": "structured_json"
+      "other": "",
+      "years_of_experience": 1.92,
+      "company_name": "Really Great Tech",
+      "job_title": "Data Analyst"
+    }
   }
 }

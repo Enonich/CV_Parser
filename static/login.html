@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login • CV Parser Pro</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+  <div class="w-full max-w-md bg-white rounded-xl shadow-lg border p-8">
+    <div class="text-center mb-6">
+      <h1 class="text-2xl font-bold text-blue-900">CV Parser Pro</h1>
+      <p id="subtitle" class="text-sm text-gray-500 mt-1">Sign in to your workspace</p>
+    </div>
+    <form id="login-form" class="space-y-5">
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Email</label>
+        <input type="email" name="email" required class="mt-1 w-full border rounded-md px-3 py-2" placeholder="you@example.com" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Password</label>
+        <div class="relative">
+          <input type="password" id="login-password" name="password" required minlength="8" class="mt-1 w-full border rounded-md px-3 py-2 pr-10" placeholder="••••••••" />
+          <button type="button" onclick="togglePasswordVisibility('login-password', 'login-eye-icon')" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none mt-0.5">
+            <i id="login-eye-icon" class="fas fa-eye"></i>
+          </button>
+        </div>
+      </div>
+      <button type="submit" class="w-full bg-blue-700 text-white py-3 rounded-lg font-medium hover:bg-blue-800 flex items-center justify-center space-x-2">
+        <span id="login-text">Login</span>
+        <div id="login-spinner" class="hidden spinner border-2 ml-2"></div>
+      </button>
+      <p id="login-error" class="text-sm text-red-600 hidden"></p>
+    </form>
+    <div id="toggle-to-register" class="mt-6 text-center">
+      <p class="text-xs text-gray-500">Don't have an account? <a href="#" id="show-register" class="text-blue-600 hover:underline font-medium">Create one</a></p>
+    </div>
+    <form id="register-form" class="space-y-5 hidden">
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Email</label>
+        <input type="email" name="email" required class="mt-1 w-full border rounded-md px-3 py-2" placeholder="you@example.com" />
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Company Name</label>
+        <input type="text" name="company" required class="mt-1 w-full border rounded-md px-3 py-2" placeholder="Your Company Name" />
+        <p class="mt-1 text-xs text-gray-500">This will be used to create your company's database</p>
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-700">Password</label>
+        <div class="relative">
+          <input type="password" id="register-password" name="password" required minlength="8" class="mt-1 w-full border rounded-md px-3 py-2 pr-10" placeholder="••••••••" />
+          <button type="button" onclick="togglePasswordVisibility('register-password', 'register-eye-icon')" class="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none mt-0.5">
+            <i id="register-eye-icon" class="fas fa-eye"></i>
+          </button>
+        </div>
+        <p class="mt-1 text-xs text-gray-500">Minimum 8 characters</p>
+      </div>
+      <button type="submit" class="w-full bg-green-700 text-white py-3 rounded-lg font-medium hover:bg-green-800 flex items-center justify-center space-x-2">
+        <span id="register-text">Register</span>
+        <div id="register-spinner" class="hidden spinner border-2 ml-2"></div>
+      </button>
+      <p id="register-error" class="text-sm text-red-600 hidden"></p>
+    </form>
+    <div id="toggle-to-login" class="mt-6 text-center hidden">
+      <p class="text-xs text-gray-500">Already have an account? <a href="#" id="show-login" class="text-blue-600 hover:underline font-medium">Sign in</a></p>
+    </div>
+  </div>
+
+  <script src="/static/login.js" defer></script>
+  <script>
+    function togglePasswordVisibility(inputId, iconId) {
+      const passwordInput = document.getElementById(inputId);
+      const eyeIcon = document.getElementById(iconId);
+      
+      if (passwordInput.type === 'password') {
+        passwordInput.type = 'text';
+        eyeIcon.classList.remove('fa-eye');
+        eyeIcon.classList.add('fa-eye-slash');
+      } else {
+        passwordInput.type = 'password';
+        eyeIcon.classList.remove('fa-eye-slash');
+        eyeIcon.classList.add('fa-eye');
+      }
+    }
+
+    // Toggle between login and register forms
+    document.addEventListener('DOMContentLoaded', function() {
+      const loginForm = document.getElementById('login-form');
+      const registerForm = document.getElementById('register-form');
+      const toggleToRegister = document.getElementById('toggle-to-register');
+      const toggleToLogin = document.getElementById('toggle-to-login');
+      const subtitle = document.getElementById('subtitle');
+      const showRegisterBtn = document.getElementById('show-register');
+      const showLoginBtn = document.getElementById('show-login');
+
+      showRegisterBtn?.addEventListener('click', function(e) {
+        e.preventDefault();
+        loginForm.classList.add('hidden');
+        toggleToRegister.classList.add('hidden');
+        registerForm.classList.remove('hidden');
+        toggleToLogin.classList.remove('hidden');
+        subtitle.textContent = 'Create your account';
+      });
+
+      showLoginBtn?.addEventListener('click', function(e) {
+        e.preventDefault();
+        registerForm.classList.add('hidden');
+        toggleToLogin.classList.add('hidden');
+        loginForm.classList.remove('hidden');
+        toggleToRegister.classList.remove('hidden');
+        subtitle.textContent = 'Sign in to your workspace';
+      });
+    });
+  </script>
+  <style>
+    .spinner { border-top-color: #fff; width:18px; height:18px; border-radius:50%; animation: spin .9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</body>
+</html>

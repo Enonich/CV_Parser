@@ -1,184 +1,377 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CV Parser & Scoring System</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <link href="/static/styles.css" rel="stylesheet">
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>CV Parser Pro</title>
+
+  <!-- Tailwind (via CDN – you can replace with a local build later) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Font Awesome -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels"></script>
+
+  <!-- Custom CSS -->
+  <link rel="stylesheet" href="/static/styles.css">
+  
+  <style>
+    /* Hide content until authenticated */
+    body.auth-checking {
+      visibility: hidden;
+    }
+  </style>
 </head>
-<body>
-    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
-        <div class="container">
-            <a class="navbar-brand" href="#">
-                <i class="fas fa-file-alt me-2"></i>CV Parser & Scoring
-            </a>
-        </div>
-    </nav>
+<body class="bg-gray-50 text-gray-800 font-sans auth-checking">
 
-    <div class="container mt-4">
-        <!-- Header Section -->
-        <div class="row mb-4">
-            <div class="col-12">
-                <div class="card bg-gradient-primary text-white">
-                    <div class="card-body text-center">
-                        <h1 class="display-4 mb-3">
-                            <i class="fas fa-search me-3"></i>CV Parser & Scoring System
-                        </h1>
-                        <p class="lead">Upload CVs and job descriptions to get intelligent matching scores</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Existing CVs Section -->
-        <div class="row mb-4" id="existingCvsSection" style="display: none;">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header bg-success text-white">
-                        <h5 class="mb-0">
-                            <i class="fas fa-database me-2"></i>Existing CVs in Database
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="existingCvsList"></div>
-                        <button class="btn btn-outline-success mt-3" onclick="loadExistingCVs()">
-                            <i class="fas fa-sync me-2"></i>Refresh List
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Upload Section -->
-        <div class="row mb-4">
-            <!-- CV Upload -->
-            <div class="col-md-6">
-                <div class="card h-100">
-                    <div class="card-header bg-success text-white">
-                        <h5 class="mb-0">
-                            <i class="fas fa-upload me-2"></i>Upload CV
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="upload-area" id="cvUploadArea">
-                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                            <h5>Drop CV file here or click to browse</h5>
-                            <p class="text-muted">Supports: PDF, DOCX, PNG, JPG, JPEG</p>
-                            <input type="file" id="cvFile" class="d-none" accept=".pdf,.docx,.png,.jpg,.jpeg">
-                            <button class="btn btn-outline-primary" onclick="document.getElementById('cvFile').click()">
-                                Choose File
-                            </button>
-                        </div>
-                        <div id="cvUploadStatus" class="mt-3"></div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Job Description Upload -->
-            <div class="col-md-6">
-                <div class="card h-100">
-                    <div class="card-header bg-info text-white">
-                        <h5 class="mb-0">
-                            <i class="fas fa-briefcase me-2"></i>Upload Job Description
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="upload-area" id="jdUploadArea">
-                            <i class="fas fa-cloud-upload-alt fa-3x text-muted mb-3"></i>
-                            <h5>Drop JD file here or click to browse</h5>
-                            <p class="text-muted">Supports: TXT, PDF, DOCX</p>
-                            <input type="file" id="jdFile" class="d-none" accept=".txt,.pdf,.docx">
-                            <button class="btn btn-outline-info" onclick="document.getElementById('jdFile').click()">
-                                Choose File
-                            </button>
-                        </div>
-                        <div id="jdUploadStatus" class="mt-3"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Search Controls -->
-        <div class="row mb-4">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header bg-warning text-dark">
-                        <h5 class="mb-0">
-                            <i class="fas fa-cogs me-2"></i>Search Configuration
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="row">
-                            <div class="col-md-3">
-                                <label for="topKCvs" class="form-label">Number of CVs to return:</label>
-                                <input type="number" class="form-control" id="topKCvs" value="5" min="1" max="20">
-                            </div>
-                            <div class="col-md-3">
-                                <div class="form-check mt-4">
-                                    <input class="form-check-input" type="checkbox" id="showDetails">
-                                    <label class="form-check-label" for="showDetails">
-                                        Show detailed matching information
-                                    </label>
-                                </div>
-                            </div>
-                            <div class="col-md-3">
-                                <button class="btn btn-secondary mt-3 w-100" onclick="resetUploads()">
-                                    <i class="fas fa-refresh me-2"></i>Reset Uploads
-                                </button>
-                            </div>
-                            <div class="col-md-3">
-                                <button class="btn btn-primary btn-lg mt-3 w-100" id="searchBtn" onclick="searchCVs()">
-                                    <i class="fas fa-search me-2"></i>Search & Score CVs
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Results Section -->
-        <div class="row" id="resultsSection" style="display: none;">
-            <div class="col-12">
-                <div class="card">
-                    <div class="card-header bg-dark text-white">
-                        <h5 class="mb-0">
-                            <i class="fas fa-chart-line me-2"></i>Scoring Results
-                        </h5>
-                    </div>
-                    <div class="card-body">
-                        <div id="resultsContent"></div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Loading Spinner -->
-        <div id="loadingSpinner" class="text-center" style="display: none;">
-            <div class="spinner-border text-primary" role="status">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <p class="mt-2">Processing your request...</p>
-        </div>
+  <!-- ==================== HEADER ==================== -->
+  <header class="bg-white shadow-sm border-b fixed top-0 left-0 right-0 z-50">
+    <div class="flex items-center justify-between px-6 py-3">
+      <div class="flex items-center space-x-8">
+        <h1 class="text-2xl font-bold text-blue-900">CV Parser Pro</h1>
+        <nav class="hidden md:flex space-x-6">
+          <a href="#" class="tab-link text-blue-700 font-medium" data-tab="dashboard">Dashboard</a>
+          <a href="#" class="tab-link text-gray-600 hover:text-blue-700" data-tab="upload-cv">Upload CV</a>
+          <a href="#" class="tab-link text-gray-600 hover:text-blue-700" data-tab="upload-jd">Upload JD</a>
+          <a href="#" class="tab-link text-gray-600 hover:text-blue-700" data-tab="search">Search CVs</a>
+        </nav>
+      </div>
+      <div class="flex items-center space-x-4">
+        <div id="user-info" class="text-sm text-gray-600 hidden"></div>
+        <button id="admin-link-btn" class="text-blue-600 hover:underline text-sm hidden">Admin Panel</button>
+        <button id="logout-btn" class="text-red-600 hover:underline text-sm">Logout</button>
+      </div>
     </div>
+  </header>
 
-    <!-- Toast Container for Notifications -->
-    <div class="toast-container position-fixed bottom-0 end-0 p-3">
-        <div id="notificationToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
-            <div class="toast-header">
-                <i class="fas fa-info-circle text-primary me-2"></i>
-                <strong class="me-auto">Notification</strong>
-                <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
-            </div>
-            <div class="toast-body" id="toastMessage">
-                <!-- Toast message will be inserted here -->
-            </div>
+  <!-- ==================== SIDEBAR ==================== -->
+  <aside class="fixed left-0 top-16 bottom-0 w-64 bg-white shadow-md p-6 hidden lg:block">
+    <ul class="space-y-3">
+      <li><a href="#" class="tab-link flex items-center space-x-3 text-blue-700 font-medium" data-tab="dashboard"><i class="fas fa-tachometer-alt"></i><span>Dashboard</span></a></li>
+      <li><a href="#" class="tab-link flex items-center space-x-3 text-gray-600 hover:text-blue-700" data-tab="upload-cv"><i class="fas fa-user-plus"></i><span>Upload CV</span></a></li>
+      <li><a href="#" class="tab-link flex items-center space-x-3 text-gray-600 hover:text-blue-700" data-tab="upload-jd"><i class="fas fa-file-alt"></i><span>Upload JD</span></a></li>
+      <li><a href="#" class="tab-link flex items-center space-x-3 text-gray-600 hover:text-blue-700" data-tab="search"><i class="fas fa-search"></i><span>Search & Rank</span></a></li>
+    </ul>
+  </aside>
+
+  <!-- ==================== MAIN CONTENT ==================== -->
+  <main class="lg:ml-64 pt-20 px-6 pb-12">
+
+    <!-- Dashboard -->
+    <section id="dashboard" class="mb-12">
+      <!-- Context Bar -->
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+        <div class="flex justify-between items-center">
+          <div>
+            <h2 class="text-xl font-bold text-blue-900">
+              <span id="dash-company">Select a company</span>
+              <span id="dash-job-inline" class="text-blue-700"></span>
+            </h2>
+            <p class="text-sm text-blue-600 mt-1">Multi-tenant pipeline overview</p>
+          </div>
+          <button id="change-context" class="text-blue-700 hover:underline text-sm flex items-center space-x-1">
+            <i class="fas fa-sync"></i><span>Change</span>
+          </button>
         </div>
-    </div>
+      </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/script.js"></script>
+      <!-- Jobs Grid -->
+      <div id="jobs-section" class="mb-8">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-semibold">Your Job Roles</h3>
+          <span id="jobs-count" class="text-sm text-gray-500"></span>
+        </div>
+        <div id="jobs-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <p class="text-sm text-gray-500 italic col-span-full">Loading jobs...</p>
+        </div>
+      </div>
+
+      <!-- Job Details Section (shown when a job is selected) -->
+      <div id="job-details-section" class="hidden">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-semibold">
+            Job Details: <span id="selected-job-title" class="text-blue-700"></span>
+          </h3>
+          <button id="close-job-details" class="text-gray-600 hover:text-gray-800">
+            <i class="fas fa-times"></i> Close
+          </button>
+        </div>
+
+        <!-- KPI Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          <div class="bg-white p-5 rounded-lg shadow-sm border text-center">
+            <p class="text-sm text-gray-500">CVs in Pipeline</p>
+            <p id="kpi-cvs" class="text-3xl font-bold text-gray-900">0</p>
+          </div>
+          <div class="bg-white p-5 rounded-lg shadow-sm border text-center">
+            <p class="text-sm text-gray-500">Top Match</p>
+            <p id="kpi-top" class="text-3xl font-bold text-green-700">–</p>
+          </div>
+          <div class="bg-white p-5 rounded-lg shadow-sm border text-center">
+            <p class="text-sm text-gray-500">Avg Match Score</p>
+            <p id="kpi-avg" class="text-3xl font-bold text-blue-700">–</p>
+          </div>
+          <div class="bg-white p-5 rounded-lg shadow-sm border text-center">
+            <p class="text-sm text-gray-500">New Today</p>
+            <p id="kpi-new" class="text-3xl font-bold text-purple-700">0</p>
+          </div>
+        </div>
+    
+        <!-- Top Candidates -->
+        <div class="bg-white rounded-lg shadow-sm border p-6 mb-6">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="text-lg font-semibold">Top 5 Candidates</h3>
+            <button class="tab-link text-blue-600 hover:underline text-sm" data-tab="search">View All →</button>
+          </div>
+          <div id="top-candidates" class="space-y-3">
+            <p class="text-sm text-gray-500 italic">Select a job to see rankings</p>
+          </div>
+        </div>
+      </div>
+    
+      <!-- Activity & Alerts -->
+      <div class="bg-white rounded-lg shadow-sm border p-6">
+        <h3 class="text-lg font-semibold mb-4">Recent Activity & Alerts</h3>
+        <div id="activity-log" class="text-sm text-gray-600 space-y-2 max-h-48 overflow-y-auto">
+          <p class="italic">No activity yet. Upload a CV or JD to begin.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Upload CV -->
+    <section id="upload-cv" class="hidden max-w-4xl mx-auto">
+      <h2 class="text-3xl font-bold mb-8 text-center">Upload Candidate CV</h2>
+      <form id="cv-form" enctype="multipart/form-data" class="space-y-6">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Job Title *</label>
+          <input type="text" name="job_title" required class="mt-1 block w-full border rounded-md px-3 py-2" placeholder="e.g., Senior ML Engineer" list="job-titles-list" />
+          <datalist id="job-titles-list"></datalist>
+          <p class="mt-1 text-xs text-gray-500">Enter a new job title or select an existing one</p>
+          <input type="hidden" name="company_name" id="hidden-company-name" />
+        </div>
+
+        <div id="cv-dropzone" class="bg-white p-10 rounded-xl shadow-lg border-2 border-dashed border-gray-300 text-center cursor-pointer">
+          <i class="fas fa-cloud-upload-alt text-6xl text-blue-600 mb-4"></i>
+          <p class="text-xl font-medium text-gray-700 mb-2">Drop CVs here</p>
+          <p class="text-sm text-gray-500">or <span class="text-blue-600 underline">click to browse</span></p>
+          <p class="text-xs text-gray-400 mt-2">You can select multiple files at once</p>
+          <input type="file" name="files" multiple accept=".pdf,.docx,.png,.jpg,.jpeg" class="hidden" />
+        </div>
+
+        <div id="cv-file-info" class="hidden bg-gray-50 p-4 rounded-lg">
+          <div class="flex justify-between items-center mb-2">
+            <span class="font-medium text-sm">Selected Files (<span id="cv-file-count">0</span>)</span>
+            <button type="button" id="cv-clear-files" class="text-red-600 hover:underline text-sm">Clear All</button>
+          </div>
+          <div id="cv-file-list" class="space-y-1 max-h-40 overflow-y-auto"></div>
+        </div>
+
+        <div class="flex justify-center space-x-4">
+          <button type="submit" class="bg-blue-700 text-white px-8 py-3 rounded-lg hover:bg-blue-800 flex items-center space-x-2">
+            <span id="cv-submit-text">Parse & Save CVs</span>
+            <div id="cv-spinner" class="hidden spinner ml-2"></div>
+          </button>
+          <button type="button" class="tab-link bg-gray-300 px-8 py-3 rounded-lg" data-tab="dashboard">Cancel</button>
+        </div>
+        <div id="cv-upload-progress" class="hidden mt-4">
+          <div class="bg-gray-200 rounded-full h-4 overflow-hidden">
+            <div id="cv-progress-bar" class="bg-blue-600 h-full transition-all duration-300" style="width: 0%"></div>
+          </div>
+          <p id="cv-progress-text" class="text-sm text-gray-600 text-center mt-2">Uploading 0 of 0 files...</p>
+        </div>
+      </form>
+    </section>
+
+    <!-- Upload JD -->
+    <section id="upload-jd" class="hidden max-w-4xl mx-auto">
+      <h2 class="text-3xl font-bold mb-8 text-center">Upload Job Description</h2>
+      <form id="jd-form" enctype="multipart/form-data" class="space-y-6">
+        <div>
+          <label class="block text-sm font-medium text-gray-700">Job Title *</label>
+          <input type="text" name="job_title" required class="mt-1 block w-full border rounded-md px-3 py-2" placeholder="e.g., Data Analyst" list="jd-job-titles-list" />
+          <datalist id="jd-job-titles-list"></datalist>
+          <p class="mt-1 text-xs text-gray-500">Enter a new job title or select an existing one</p>
+          <input type="hidden" name="company_name" id="hidden-jd-company-name" />
+        </div>
+
+        <!-- Tab switcher for file upload vs text input -->
+        <div class="flex gap-2 border-b border-gray-200">
+          <button type="button" id="jd-upload-tab" class="px-4 py-2 font-medium text-blue-700 border-b-2 border-blue-700">
+            <i class="fas fa-upload mr-2"></i>Upload File
+          </button>
+          <button type="button" id="jd-text-tab" class="px-4 py-2 font-medium text-gray-600 hover:text-blue-700">
+            <i class="fas fa-keyboard mr-2"></i>Enter Job Description
+          </button>
+        </div>
+
+        <!-- File Upload Section -->
+        <div id="jd-upload-section">
+          <div id="jd-dropzone" class="bg-white p-10 rounded-xl shadow-lg border-2 border-dashed border-gray-300 text-center cursor-pointer">
+            <i class="fas fa-file-alt text-6xl text-green-600 mb-4"></i>
+            <p class="text-xl font-medium text-gray-700 mb-2">Drop JD here</p>
+            <p class="text-sm text-gray-500">or <span class="text-blue-600 underline">click to browse</span></p>
+            <input type="file" name="file" accept=".pdf,.docx,.txt" class="hidden" />
+          </div>
+
+          <!-- Selected file display -->
+          <div id="jd-file-info" class="hidden bg-blue-50 p-4 rounded-lg border border-blue-200 mt-4">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2">
+                <i class="fas fa-file-alt text-blue-600"></i>
+                <span id="jd-file-name" class="text-gray-700 font-medium"></span>
+              </div>
+              <button type="button" id="jd-clear-file" class="text-red-600 hover:text-red-800">
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Text Input Section -->
+        <div id="jd-text-section" class="hidden">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-2">Job Description Text *</label>
+            <textarea 
+              id="jd-text-input" 
+              name="jd_text" 
+              rows="15" 
+              class="mt-1 block w-full border rounded-md px-3 py-2 font-mono text-sm"
+              placeholder="Paste the full job description here...
+
+Example:
+Job Title: Senior Data Analyst
+Location: Remote
+Experience: 5+ years
+
+Responsibilities:
+- Analyze complex datasets
+- Create dashboards and reports
+- etc..."
+            ></textarea>
+            <p class="mt-2 text-xs text-gray-500">
+              <i class="fas fa-info-circle"></i> 
+              Paste the complete job description including responsibilities, requirements, and qualifications
+            </p>
+          </div>
+        </div>
+
+        <div class="flex justify-center space-x-4">
+          <button type="submit" class="bg-green-700 text-white px-8 py-3 rounded-lg hover:bg-green-800 flex items-center space-x-2">
+            <span id="jd-submit-text">Save JD</span>
+            <div id="jd-spinner" class="hidden spinner ml-2"></div>
+          </button>
+          <button type="button" class="tab-link bg-gray-300 px-8 py-3 rounded-lg" data-tab="dashboard">Cancel</button>
+        </div>
+      </form>
+    </section>
+
+    <!-- Search & Rank -->
+    <section id="search" class="hidden">
+      <h2 class="text-3xl font-bold mb-8">Search & Rank Candidates</h2>
+      <div class="bg-white p-6 rounded-lg shadow-sm border mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Job Title</label>
+            <select id="search-job" class="mt-1 block w-full border rounded-md px-3 py-2"></select>
+          </div>
+          <div class="flex items-end">
+            <button id="search-btn" class="bg-blue-700 text-white px-6 py-2 rounded-lg hover:bg-blue-800 disabled:bg-gray-400 disabled:cursor-not-allowed w-full flex items-center justify-center space-x-2 transition-colors">
+              <i class="fas fa-search"></i> <span>Search</span>
+              <div id="search-spinner" class="hidden spinner ml-2"></div>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div id="search-results" class="hidden space-y-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-xl font-semibold">Ranked Candidates</h3>
+          <p class="text-sm text-gray-600">Showing <span id="result-count">0</span> results</p>
+        </div>
+        <div id="results-list"></div>
+      </div>
+    </section>
+
+    <!-- Admin Section -->
+    <section id="admin" class="hidden max-w-5xl mx-auto">
+      <h2 class="text-3xl font-bold mb-8">Admin Console</h2>
+      <p class="text-center text-gray-600 mb-4">
+        <a href="/static/admin.html" class="text-blue-600 hover:underline">Go to Admin Dashboard →</a>
+      </p>
+      <div class="grid md:grid-cols-2 gap-8">
+        <div class="bg-white p-6 rounded-lg shadow-sm border">
+          <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i class="fas fa-users-cog text-blue-600"></i> Users</h3>
+          <form id="admin-create-user" class="space-y-3 mb-6">
+            <input type="email" name="email" required placeholder="user@example.com" class="w-full border rounded px-3 py-2 text-sm" />
+            <input type="password" name="password" required minlength="8" placeholder="Password" class="w-full border rounded px-3 py-2 text-sm" />
+            <input type="text" name="companies" placeholder="Companies (comma separated)" class="w-full border rounded px-3 py-2 text-sm" />
+            <select name="role" class="w-full border rounded px-3 py-2 text-sm">
+              <option value="user">User</option>
+              <option value="admin">Admin</option>
+            </select>
+            <button class="bg-blue-700 text-white px-4 py-2 rounded text-sm">Create User</button>
+            <p id="admin-user-msg" class="text-xs text-gray-500"></p>
+          </form>
+          <div class="flex justify-between items-center mb-2">
+            <h4 class="font-medium">Existing Users</h4>
+            <button id="refresh-users" class="text-xs text-blue-600 hover:underline">Refresh</button>
+          </div>
+          <div id="users-list" class="space-y-2 max-h-72 overflow-auto text-sm"></div>
+        </div>
+        <div class="bg-white p-6 rounded-lg shadow-sm border">
+          <h3 class="text-lg font-semibold mb-4 flex items-center gap-2"><i class="fas fa-building text-green-600"></i> Company Access</h3>
+          <form id="assign-company-form" class="space-y-3 mb-4">
+            <input type="email" name="email" required placeholder="user email" class="w-full border rounded px-3 py-2 text-sm" />
+            <input type="text" name="company" required placeholder="Company name" class="w-full border rounded px-3 py-2 text-sm" />
+            <button class="bg-green-700 text-white px-4 py-2 rounded text-sm">Assign Company</button>
+            <p id="assign-msg" class="text-xs text-gray-500"></p>
+          </form>
+          <form id="remove-company-form" class="space-y-3 mb-6">
+            <input type="email" name="email" required placeholder="user email" class="w-full border rounded px-3 py-2 text-sm" />
+            <input type="text" name="company" required placeholder="Company name" class="w-full border rounded px-3 py-2 text-sm" />
+            <button class="bg-red-600 text-white px-4 py-2 rounded text-sm">Remove Company</button>
+            <p id="remove-msg" class="text-xs text-gray-500"></p>
+          </form>
+          <h4 class="font-medium mb-2">Delete User</h4>
+          <form id="delete-user-form" class="flex gap-2 mb-4">
+            <input type="email" name="email" required placeholder="user email" class="flex-1 border rounded px-3 py-2 text-sm" />
+            <button class="bg-red-700 text-white px-4 py-2 rounded text-sm">Delete</button>
+          </form>
+          <p id="delete-msg" class="text-xs text-gray-500"></p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="fixed bottom-4 right-4 hidden bg-green-600 text-white px-6 py-3 rounded-lg shadow-lg flex items-center space-x-3">
+    <i class="fas fa-check-circle"></i>
+    <span id="toast-message"></span>
+  </div>
+
+  <!-- CV Details Modal -->
+  <div id="cv-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+      <div class="flex justify-between items-center p-6 border-b">
+        <h3 class="text-2xl font-bold text-gray-800">CV Details</h3>
+        <button id="close-cv-modal" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+      </div>
+      <div class="p-6 overflow-y-auto flex-1">
+        <div id="cv-modal-content" class="space-y-4">
+          <div class="text-center text-gray-500">
+            <i class="fas fa-spinner fa-spin text-3xl mb-2"></i>
+            <p>Loading CV...</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- App JS -->
+  <script src="/static/app.js" defer></script>
 </body>
 </html>
