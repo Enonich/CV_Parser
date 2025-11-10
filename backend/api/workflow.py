@@ -284,8 +284,33 @@ async def upload_cv(
                 # Embeddings will be generated on-demand during search
                 logger.info(f"[CV UPLOAD] Successfully stored CV in MongoDB without embedding. Will embed during search.")
 
+        # Ensure MongoDB connection is closed after all operations
+        try:
+            cv_inserter_dyn.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing CV inserter connection: {e}")
+
         # Clean up temporary CV file
         os.remove(cv_path)
+
+        # Check if there was an insertion error and return appropriate status
+        insertion_error_flag = insertion_error if 'insertion_error' in locals() else False
+        insertion_error_code_val = insertion_error_code if 'insertion_error_code' in locals() else None
+        insertion_error_detail_val = insertion_error_detail if 'insertion_error_detail' in locals() else None
+        
+        if insertion_error_flag:
+            # Return 500 error if insertion failed
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "message": insertion_error_detail_val or "Failed to save CV to database",
+                    "error_code": insertion_error_code_val,
+                    "cv_json_path": json_path,
+                    "company_name": company_name,
+                    "job_title": job_title
+                }
+            )
 
         return JSONResponse(content={
             "status": "success",
@@ -293,9 +318,7 @@ async def upload_cv(
             "existing": duplicate_within_job,
             "duplicate_within_job": duplicate_within_job,
             "existing_other_job_same_company": existing_other_job_same_company,
-            "insertion_error": insertion_error if 'insertion_error' in locals() else False,
-            "insertion_error_code": insertion_error_code if 'insertion_error_code' in locals() else None,
-            "insertion_error_detail": insertion_error_detail if 'insertion_error_detail' in locals() else None,
+            "insertion_error": False,
             "company_name": company_name,
             "job_title": job_title
         })
@@ -399,6 +422,11 @@ async def upload_jd(
 
         if existing_jd:
             logger.info(f"JD already exists for company='{company_name}' job_title='{job_title}' (_id={jd_id})")
+            # Ensure MongoDB connection is closed
+            try:
+                jd_inserter_dyn.close_connection()
+            except Exception as e:
+                logger.warning(f"Error closing JD inserter connection: {e}")
             os.remove(jd_path)
             return JSONResponse(content={
                 "status": "success",
@@ -410,15 +438,42 @@ async def upload_jd(
         else:
             jd_insert_success = jd_inserter_dyn.process_jd_file(json_path)
             if not jd_insert_success:
-                logger.warning("JD insertion failed - likely due to duplicate race")
+                # Re-check to distinguish duplicate from actual failure
+                recheck_jd = jd_inserter_dyn.check_jd_exists(jd_id=jd_id)
+                
+                # Ensure MongoDB connection is closed
+                try:
+                    jd_inserter_dyn.close_connection()
+                except Exception as e:
+                    logger.warning(f"Error closing JD inserter connection: {e}")
+                
                 os.remove(jd_path)
-                return JSONResponse(content={
-                    "status": "success",
-                    "jd_json_path": json_path,
-                    "jd_id": jd_id,
-                    "message": "Job Description already exists in database",
-                    "existing": True
-                })
+                
+                if recheck_jd:
+                    # It was actually a duplicate race condition
+                    logger.warning("JD insertion failed - confirmed duplicate race condition")
+                    return JSONResponse(content={
+                        "status": "success",
+                        "jd_json_path": json_path,
+                        "jd_id": jd_id,
+                        "message": "Job Description already exists in database",
+                        "existing": True
+                    })
+                else:
+                    # Actual insertion failure
+                    logger.error(f"[JD INSERTION ERROR] Failed to insert JD for job='{job_title}' company='{company_name}'")
+                    return JSONResponse(
+                        status_code=500,
+                        content={
+                            "status": "error",
+                            "message": "Failed to save Job Description to database",
+                            "error_code": "jd_insert_failed",
+                            "jd_json_path": json_path,
+                            "company_name": company_name,
+                            "job_title": job_title
+                        }
+                    )
+            
             jd_embedder_dyn = JDEmbedder(
                 model=config["embedding"]["model"],
                 persist_directory=jd_persist_dir_dyn,
@@ -426,6 +481,12 @@ async def upload_jd(
             )
             # DO NOT embed automatically - will embed during search
             logger.info(f"[JD UPLOAD] Successfully stored JD in MongoDB without embedding. Will embed during search.")
+
+        # Ensure MongoDB connection is closed after all operations
+        try:
+            jd_inserter_dyn.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing JD inserter connection: {e}")
 
         # Clean up temporary JD file
         os.remove(jd_path)
@@ -475,6 +536,12 @@ async def check_data_status(
             collection_name=jd_collection_mongo
         )
         jd_exists = jd_inserter.check_jd_exists(jd_id=jd_id) is not None
+        
+        # Ensure connection is closed
+        try:
+            jd_inserter.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing JD inserter connection in data-status: {e}")
         
         return JSONResponse(content={
             "cv_count": cv_count,
@@ -908,13 +975,44 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         # Sort by combined score
         results.sort(key=lambda x: x.get("combined_score", x.get("total_score", 0.0)), reverse=True)
 
+        # Trim results to top_k_cvs after all scoring and sorting is complete
+        results = results[:top_k_cvs]
+        logger.info(f"Trimmed results to top {top_k_cvs} candidates")
+
+        # Fetch actual identifiers (email/phone) from MongoDB for each CV
+        # Use the multi-tenant database (company-specific) to get real identifiers
+        cv_inserter_for_lookup = CVDataInserter(
+            connection_string=config["mongodb"]["connection_string"],
+            db_name=db_name_dyn,
+            collection_name=cv_collection_mongo
+        )
+        if not cv_inserter_for_lookup.connect_to_database():
+            logger.warning("Failed to connect to MongoDB for identifier lookup")
+        
         response = []
         for result in results:
             cv_id = result["cv_id"]
-            original_identifier = searcher.get_email_from_cv_id(cv_id)
+            
+            # Fetch the actual email/phone from MongoDB instead of using hash
+            original_identifier = cv_id  # Default to hash if lookup fails
+            candidate_name = "Unknown"
+            try:
+                if cv_inserter_for_lookup.collection is not None:
+                    doc = cv_inserter_for_lookup.collection.find_one(
+                        {"_id": cv_id}, 
+                        {"email": 1, "phone": 1, "name": 1}
+                    )
+                    if doc:
+                        original_identifier = doc.get("email") or doc.get("phone") or cv_id
+                        candidate_name = doc.get("name", "Unknown")
+                        logger.debug(f"Resolved cv_id {cv_id[:8]}... to {original_identifier}, name: {candidate_name}")
+            except Exception as e:
+                logger.warning(f"Failed to lookup identifier for cv_id {cv_id}: {e}")
+            
             response.append({
                 "cv_id": cv_id,
                 "original_identifier": original_identifier,
+                "name": candidate_name,
                 "total_score": result["total_score"],
                 "bm25_score": result.get("bm25_score"),
                 "cross_encoder_score": result.get("cross_encoder_score"),
@@ -923,6 +1021,12 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
                 "section_scores": result.get("cross_encoder_section_scores", result["section_scores"]),
                 "section_details": result["section_details"] if show_details else {}
             })
+        
+        # Close the lookup connection
+        try:
+            cv_inserter_for_lookup.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing lookup connection: {e}")
         ce_present = any(isinstance(r.get("cross_encoder_score"), (int, float)) for r in results)
         bm25_present = any(isinstance(r.get("bm25_score"), (int, float)) for r in results)
         meta = {
@@ -940,6 +1044,15 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             "total_results": len(results),
             "reranker_meta": reranker_meta
         }
+        # Ensure MongoDB connections are closed
+        try:
+            if 'jd_inserter' in locals():
+                jd_inserter.close_connection()
+            if 'cv_inserter' in locals():
+                cv_inserter.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing search connections: {e}")
+
         return JSONResponse(content={
             "status": "success",
             "results": response,
@@ -949,9 +1062,25 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             "meta": meta
         })
     except HTTPException as e:
+        # Cleanup connections on error
+        try:
+            if 'jd_inserter' in locals():
+                jd_inserter.close_connection()
+            if 'cv_inserter' in locals():
+                cv_inserter.close_connection()
+        except Exception:
+            pass
         logger.warning(f"Search validation or processing error: {e.detail}")
         raise e
     except Exception as e:
+        # Cleanup connections on error
+        try:
+            if 'jd_inserter' in locals():
+                jd_inserter.close_connection()
+            if 'cv_inserter' in locals():
+                cv_inserter.close_connection()
+        except Exception:
+            pass
         logger.error(f"Unexpected error searching CVs: {e}")
         raise HTTPException(status_code=500, detail=f"Error searching CVs: {str(e)}")
 
