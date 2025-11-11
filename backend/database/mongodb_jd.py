@@ -67,7 +67,12 @@ class JDDataInserter:
         return base or "unknown_job"
 
     def load_json_file(self, file_path):
-        """Load and validate JSON file"""
+        """Load and validate JSON file
+        
+        IMPORTANT: The job_title from the wrapper (form input) always takes precedence
+        over any job_title in the structured_data (document content). This ensures
+        the JD ID matches what the user entered in the form, not what's in the document.
+        """
         try:
             file_path = Path(file_path)
             if not file_path.exists():
@@ -85,20 +90,36 @@ class JDDataInserter:
             if not jd_struct:
                 logger.error("Missing 'structured_data' key in JSON.")
                 return None
-            # Merge company/job context if present at top level
+            
+            # CRITICAL: Top-level job_title (from form) ALWAYS overrides structured_data job_title
+            # This ensures JD ID is based on what user entered, not document content
             company_name = data.get('company_name')
-            job_title = data.get('job_title') or jd_struct.get('job_title')
+            job_title_from_form = data.get('job_title')  # This is what user typed in the form
+            job_title_from_doc = jd_struct.get('job_title')  # This is from document content
+            
             # Preserve sanitized variants if provided (added upstream during upload)
             company_name_sanitized = data.get('company_name_sanitized')
             job_title_sanitized = data.get('job_title_sanitized')
+            
+            # Apply company context
             if company_name:
                 jd_struct['company_name'] = company_name
-            if job_title and 'job_title' not in jd_struct:
-                jd_struct['job_title'] = job_title
             if company_name_sanitized:
                 jd_struct['company_name_sanitized'] = company_name_sanitized
             if job_title_sanitized:
                 jd_struct['job_title_sanitized'] = job_title_sanitized
+            
+            # ALWAYS use form job_title if available, otherwise fall back to document
+            if job_title_from_form:
+                jd_struct['job_title'] = job_title_from_form
+                logger.info(f"Using job_title from form: '{job_title_from_form}' (document had: '{job_title_from_doc}')")
+            elif job_title_from_doc:
+                jd_struct['job_title'] = job_title_from_doc
+                logger.warning(f"No form job_title found, using document job_title: '{job_title_from_doc}'")
+            else:
+                logger.error("No job_title found in either form data or document content")
+                return None
+            
             return jd_struct
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON format: {e}")
@@ -110,6 +131,11 @@ class JDDataInserter:
     def insert_jd_data(self, data):
         """Insert single Job Description document"""
         try:
+            # Ensure we have an active connection
+            if self.client is None or self.collection is None:
+                logger.error("No active database connection for insert_jd_data")
+                return False
+            
             job_title = data.get('job_title')
             if not job_title:
                 logger.error("Missing job_title in data.")
@@ -152,21 +178,34 @@ class JDDataInserter:
     def process_jd_file(self, file_path):
         """Complete process for a single JD file"""
         logger.info("Starting JD file processing...")
+        # Track if we need to close the connection (only if we opened it here)
+        opened_connection = False
         try:
-            if not self.connect_to_database():
-                return False
+            # Only connect if not already connected
+            if self.client is None:
+                if not self.connect_to_database():
+                    return False
+                opened_connection = True
+            
             data = self.load_json_file(file_path)
             if data is None:
                 return False
             success = self.insert_jd_data(data)
             return success
         finally:
-            self.close_connection()
+            # Only close if we opened the connection in this method
+            if opened_connection:
+                self.close_connection()
 
     def check_jd_exists(self, jd_id=None):
-        """Check if a JD already exists in the database based on JD ID."""
+        """Check if a JD already exists in the database based on JD ID.
+        
+        Note: This method does NOT close the connection to allow subsequent operations
+        on the same instance. The caller is responsible for connection management.
+        """
         try:
-            if not self.connect_to_database():
+            # Ensure connection is established
+            if self.client is None and not self.connect_to_database():
                 logger.error("Failed to connect to MongoDB")
                 return None
             
@@ -185,13 +224,16 @@ class JDDataInserter:
         except Exception as e:
             logger.error(f"Error checking JD existence: {e}")
             return None
-        finally:
-            self.close_connection()
 
     def get_all_jds(self):
-        """Get all JDs from MongoDB collection."""
+        """Get all JDs from MongoDB collection.
+        
+        Note: This method does NOT close the connection. The caller is responsible
+        for connection management (typically via process_jd_file or explicit close).
+        """
         try:
-            if not self.connect_to_database():
+            # Ensure connection is established
+            if self.client is None and not self.connect_to_database():
                 logger.error("Failed to connect to MongoDB")
                 return []
             
@@ -210,8 +252,6 @@ class JDDataInserter:
         except Exception as e:
             logger.error(f"Error retrieving JDs from MongoDB: {e}")
             return []
-        finally:
-            self.close_connection()
 
 
 # Example usage

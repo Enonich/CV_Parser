@@ -348,7 +348,7 @@ class CVJDVectorSearch:
             logger.error(f"Error in batched section scoring for '{jd_section}': {e}")
             return 0.0, []
     
-    def search_and_score_cvs(self, top_k_cvs: int = 5) -> List[Dict]:
+    def search_and_score_cvs(self, top_k_cvs: Optional[int] = 5) -> List[Dict]:
         """Search and score CVs against the JD in job_descriptions collection."""
         # Fetch JD chunks
         jd_chunks = self.fetch_jd_chunks()
@@ -400,7 +400,9 @@ class CVJDVectorSearch:
         # Sort CVs by total score
         cv_scores.sort(key=lambda x: x["total_score"], reverse=True)
         logger.info(f"Ranked {len(cv_scores)} CVs from job_descriptions collection")
-        return cv_scores[:top_k_cvs]
+        if top_k_cvs is not None and top_k_cvs > 0:
+            return cv_scores[:top_k_cvs]
+        return cv_scores
     
     def print_results(self, results: List[Dict], show_details: bool = False):
         """Print ranked CVs with section-wise scores and optional details."""
@@ -440,8 +442,8 @@ class CVJDVectorSearch:
 # Example usage
 if __name__ == "__main__":
     searcher = CVJDVectorSearch(
-        cv_persist_dir="./chroma_db",
-        jd_persist_dir="./jd_chroma_db",
+        cv_persist_dir="../../data/chroma_db",
+        jd_persist_dir="../../data/jd_chroma_db",
         cv_collection_name="cv_sections",
         jd_collection_name="job_descriptions",
         model="mxbai-embed-large",

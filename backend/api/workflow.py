@@ -26,6 +26,18 @@ from backend.embedders.cv_chroma_embedder import CVEmbedder
 from backend.embedders.jd_embedder import JDEmbedder
 from backend.core.fetch_top_k import CVJDVectorSearch
 from backend.core.reranker import CVJDReranker
+from backend.core.feature_extraction import (
+    SkillTaxonomy,
+    build_cv_skill_set,
+    build_jd_skill_groups,
+    compute_skill_coverage,
+    depth_indicators,
+    aggregate_depth_score,
+    placeholder_recency,
+    improved_recency,
+    dynamic_coverage_threshold,
+)
+from backend.extractors.impact_extraction import extract_impact_features
 import logging
 
 # Configure logging
@@ -563,9 +575,13 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
     or malformed on the frontend. Provides clearer validation errors.
     """
     try:
+        # ------------------------------
+        # 1. Parse & validate request
+        # ------------------------------
         raw_body = await request.body()
         body_text = raw_body.decode("utf-8") if raw_body else "{}"
-        logger.info(f"/search-cvs/ raw body length={len(body_text)} text={body_text}")
+        preview = body_text[:500] + ("..." if len(body_text) > 500 else "")
+        logger.info(f"/search-cvs/ raw body length={len(body_text)} preview={preview}")
         diag_headers = {k: v for k, v in request.headers.items() if k.lower() in ["content-type", "user-agent", "accept", "x-company-name", "x-job-title"]}
         logger.info(f"/search-cvs/ headers: {diag_headers}")
         try:
@@ -580,7 +596,6 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         show_details = bool(payload.get("show_details", False))
         logger.info(f"/search-cvs/ parsed keys: {list(payload.keys())}; company_name='{company_name}' job_title='{job_title}' jd_id='{jd_id_raw}' top_k_cvs={top_k_cvs}")
 
-        # Fallback sources if missing
         if not company_name or not job_title:
             qp_company = (request.query_params.get("company_name") or "").strip()
             qp_job = (request.query_params.get("job_title") or "").strip()
@@ -589,67 +604,57 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             with _context_lock:
                 cached_company = _last_context.get("company_name", "").strip()
                 cached_job = _last_context.get("job_title", "").strip()
-            if not company_name and qp_company:
-                company_name = qp_company
-            if not job_title and qp_job:
-                job_title = qp_job
-            if not company_name and header_company:
-                company_name = header_company
-            if not job_title and header_job:
-                job_title = header_job
-            if not company_name and cached_company:
-                company_name = cached_company
-            if not job_title and cached_job:
-                job_title = cached_job
-            logger.info(f"/search-cvs/ after fallbacks: company_name='{company_name}' job_title='{job_title}' (cached_company='{cached_company}' cached_job='{cached_job}')")
+            company_name = company_name or qp_company or header_company or cached_company
+            job_title = job_title or qp_job or header_job or cached_job
+            logger.info(f"/search-cvs/ after fallbacks: company_name='{company_name}' job_title='{job_title}'")
 
         errors: List[str] = []
         if not company_name:
             errors.append("company_name is required")
         if not job_title:
             errors.append("job_title is required")
-        if top_k_cvs is None or not isinstance(top_k_cvs, int) or top_k_cvs <= 0:
-            cfg_default = int(config["search"].get("top_k_cvs", 5))
-            logger.info(f"Using fallback top_k_cvs={cfg_default} (provided={top_k_cvs})")
-            top_k_cvs = cfg_default
         if errors:
             raise HTTPException(status_code=400, detail=errors)
 
+        logger.info(f"Received top_k_cvs: value={top_k_cvs}, type={type(top_k_cvs)}")
+        if top_k_cvs is None or not isinstance(top_k_cvs, int) or top_k_cvs <= 0:
+            top_k_cvs = int(config["search"].get("top_k_cvs", 5))
+            logger.info(f"Using fallback top_k_cvs={top_k_cvs}")
+        max_allowed = int(config["search"].get("max_top_k_cvs", 100))
+        if top_k_cvs > max_allowed:
+            logger.info(f"Clamping top_k_cvs from {top_k_cvs} to {max_allowed}")
+            top_k_cvs = max_allowed
+
         _enforce_company_access(company_name, current_user)
-        
-        # Get MongoDB collections info
+
+        # ------------------------------
+        # 2. Resolve dynamic collection/dir names
+        # ------------------------------
         db_name_dyn, cv_collection_mongo, jd_collection_mongo = build_mongo_names(company_name, job_title)
-        
         cv_collection_dyn, jd_collection_dyn = build_collection_names(company_name, job_title)
         cv_persist_dir_dyn, jd_persist_dir_dyn = build_persist_directories(
             config["chroma"]["cv_persist_dir"],
             config["chroma"]["jd_persist_dir"],
             company_name
         )
-        logger.info(f"Dynamic collections resolved: CV='{cv_collection_dyn}' JD='{jd_collection_dyn}' persist_cv='{cv_persist_dir_dyn}' persist_jd='{jd_persist_dir_dyn}'")
+        logger.info(f"Dynamic collections: CV='{cv_collection_dyn}' JD='{jd_collection_dyn}'")
 
-        # ========== EMBEDDING ON DEMAND ==========
-        # Before searching, ensure all CVs and the JD are embedded
-        logger.info(f"[SEARCH] Starting on-demand embedding for company='{company_name}' job='{job_title}'")
+        # ------------------------------
+        # 3. Ensure JD embedded (on-demand)
+        # ------------------------------
+        logger.info(f"[SEARCH] On-demand embedding start company='{company_name}' job='{job_title}'")
         
-        # Check if JD exists and embed it
         temp_inserter_for_id = JDDataInserter()
         jd_id = temp_inserter_for_id.generate_jd_id(job_title, company_name)
-        
         jd_inserter = JDDataInserter(
             connection_string=config["mongodb"]["connection_string"],
             db_name=db_name_dyn,
             collection_name=jd_collection_mongo
         )
         jd_doc = jd_inserter.check_jd_exists(jd_id=jd_id)
-        
         if not jd_doc:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No job description found for {job_title}. Please upload a JD first."
-            )
-        
-        # Embed JD if not already embedded
+            raise HTTPException(status_code=404, detail=f"No job description found for {job_title}. Please upload a JD first.")
+
         os.makedirs(jd_persist_dir_dyn, exist_ok=True)
         jd_embedder_dyn = JDEmbedder(
             model=config["embedding"]["model"],
@@ -705,7 +710,9 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         else:
             logger.info(f"[SEARCH] JD already embedded ({jd_embedded_count} docs)")
         
-        # Check if CVs exist and embed them
+        # ------------------------------
+        # 4. Ensure CVs embedded (on-demand)
+        # ------------------------------
         cv_inserter = CVDataInserter(
             connection_string=config["mongodb"]["connection_string"],
             db_name=db_name_dyn,
@@ -844,9 +851,10 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         else:
             logger.info(f"[SEARCH] CVs already embedded ({cv_embedded_count} docs)")
         
-        # ========== NOW PROCEED WITH SEARCH ==========
-        logger.info(f"[SEARCH] Starting vector search with embedded data")
-
+        # ------------------------------
+        # 5. Vector search (full corpus first)
+        # ------------------------------
+        logger.info("[SEARCH] Starting vector search")
         searcher = CVJDVectorSearch(
             cv_persist_dir=cv_persist_dir_dyn,
             jd_persist_dir=jd_persist_dir_dyn,
@@ -855,9 +863,10 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             model=config["embedding"]["model"],
             top_k_per_section=config["search"]["top_k_per_section"]
         )
-        results = searcher.search_and_score_cvs(top_k_cvs=top_k_cvs)
-        if not results:
+        results_full = searcher.search_and_score_cvs(top_k_cvs=None)
+        if not results_full:
             raise HTTPException(status_code=404, detail="No CVs found or no JD available for this context")
+        results = list(results_full)
 
         jd_id_used: Optional[str] = None
         reranker_meta: Dict[str, Any] = {}
@@ -913,71 +922,273 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             rerank_mode = "disabled"
 
         # ========================================
-        # HYBRID 3-WEIGHT SCORING SYSTEM
-        # Combines: vector_score + bm25_score + cross_encoder_score
+        # HYBRID SCORING (Improved):
+        # Components: vector_score + bm25_norm (if provided) + ce_global_norm + ce_section_weighted
         # ========================================
-        
-        # Normalize cross-encoder scores to [0, 1]
-        ce_scores = [r.get("cross_encoder_score") for r in results if isinstance(r.get("cross_encoder_score"), (int, float))]
-        if ce_scores:
-            ce_min, ce_max = min(ce_scores), max(ce_scores)
-            ce_span = ce_max - ce_min if ce_max != ce_min else 1.0
-        
-        # Normalize BM25 scores to [0, 1] (should already be normalized, but ensure)
-        bm25_scores_list = [r.get("bm25_score") for r in results if isinstance(r.get("bm25_score"), (int, float))]
-        if bm25_scores_list:
-            bm25_min, bm25_max = min(bm25_scores_list), max(bm25_scores_list)
-            bm25_span = bm25_max - bm25_min if bm25_max != bm25_min else 1.0
-        
-        # Compute hybrid combined score for each result
+        # 1. Determine if BM25 already normalized by reranker (avoid double normalization)
+        reranker_bm25_meta = reranker_meta.get("bm25_normalization") if isinstance(reranker_meta, dict) else None
+        bm25_already_normalized = bool(reranker_bm25_meta and reranker_bm25_meta.get("method") == "saturation")
+        bm25_scores_list = [r.get("bm25_score") for r in results_full if isinstance(r.get("bm25_score"), (int, float))]
+        bm25_active = enable_bm25 and bool(bm25_scores_list)
+        if not bm25_already_normalized and bm25_active:
+            # Compute saturation once if raw scores (fallback scenario when reranker absent)
+            try:
+                import statistics
+                bm25_median = statistics.median(bm25_scores_list)
+            except Exception:
+                bm25_median = sum(bm25_scores_list) / max(len(bm25_scores_list), 1)
+            bm25_k = max(bm25_median, 1.0)
+        else:
+            bm25_k = reranker_bm25_meta.get("k") if bm25_already_normalized else 1.0
+
+        # 2. Calibrate cross-encoder global scores using percentile scaling (p5-p95)
+        ce_raw_scores_full = [r.get("cross_encoder_score") for r in results_full if isinstance(r.get("cross_encoder_score"), (int, float))]
+        if ce_raw_scores_full:
+            sorted_ce = sorted(ce_raw_scores_full)
+            p5_idx = max(int(0.05 * (len(sorted_ce)-1)), 0)
+            p95_idx = int(0.95 * (len(sorted_ce)-1))
+            ce_p5 = sorted_ce[p5_idx]
+            ce_p95 = sorted_ce[p95_idx]
+            ce_spread = ce_p95 - ce_p5
+        else:
+            ce_p5 = 0.0; ce_p95 = 1.0; ce_spread = 1.0
+
+        # Fixed fallback range for CE if spread too narrow
+        CE_SCORE_MIN_FIX = -10.0
+        CE_SCORE_MAX_FIX = 10.0
+        use_percentile_ce = ce_spread > 1e-6  # ensure non-trivial spread
+
+        # 3. Section-level CE weighted fusion
+        # Define JD section weights (align with vector search mapping philosophy)
+        jd_section_weights = {
+            "required_skills": 0.22,
+            "preferred_skills": 0.05,
+            "required_qualifications": 0.10,
+            "education_requirements": 0.05,
+            "experience_requirements": 0.10,
+            "technical_skills": 0.10,
+            "soft_skills": 0.08,
+            "certifications": 0.05,
+            "responsibilities": 0.15,
+            "job_title": 0.05,
+            "description": 0.05
+        }
+        # Normalize weights
+        total_w = sum(jd_section_weights.values())
+        if total_w > 0:
+            for k in jd_section_weights:
+                jd_section_weights[k] = jd_section_weights[k] / total_w
+
+        critical_sections = ["required_skills", "required_qualifications"]
+        penalty_per_missing = 0.05  # subtract this proportion of max score per missing critical section
+
+        # 4. Compute calibrated & fused scores per candidate
         for r in results:
-            # Vector score (already normalized 0-1 from vector search)
             vector_score = r.get("total_score", 0.0)
-            
-            # BM25 score (normalized 0-1)
-            bm25_raw = r.get("bm25_score")
-            if isinstance(bm25_raw, (int, float)) and bm25_scores_list:
-                bm25_norm = (bm25_raw - bm25_min) / bm25_span
+            bm25_val = r.get("bm25_score") if bm25_active else None
+            if bm25_active:
+                if bm25_already_normalized:
+                    bm25_norm = bm25_val if isinstance(bm25_val, (int,float)) else 0.0
+                else:
+                    bm25_norm = (bm25_val / (bm25_val + bm25_k)) if isinstance(bm25_val, (int,float)) and bm25_val > 0 else 0.0
             else:
                 bm25_norm = 0.0
-            
-            # Cross-encoder score (normalized 0-1)
+
             ce_raw = r.get("cross_encoder_score")
-            if isinstance(ce_raw, (int, float)) and ce_scores:
-                ce_norm = (ce_raw - ce_min) / ce_span
+            if isinstance(ce_raw, (int,float)):
+                if use_percentile_ce:
+                    ce_norm = (ce_raw - ce_p5) / ce_spread if ce_spread > 0 else 0.0
+                    ce_norm = 0.0 if ce_norm < 0 else (1.0 if ce_norm > 1 else ce_norm)
+                else:
+                    # Fallback fixed-range clamp
+                    ce_clamped = max(CE_SCORE_MIN_FIX, min(CE_SCORE_MAX_FIX, ce_raw))
+                    ce_norm = (ce_clamped - CE_SCORE_MIN_FIX) / (CE_SCORE_MAX_FIX - CE_SCORE_MIN_FIX)
             else:
                 ce_norm = 0.0
-            
-            # Hybrid score with configurable weights
-            # If BM25 disabled, redistribute its weight to vector and CE
-            if enable_bm25 and bm25_norm > 0:
-                r["combined_score"] = (
-                    vector_weight * vector_score + 
-                    bm25_weight * bm25_norm + 
-                    cross_encoder_weight * ce_norm
+
+            # Section-level CE aggregation
+            ce_section_scores = r.get("cross_encoder_section_scores") or {}
+            weighted_section_sum = 0.0
+            section_contributions = []
+            for sec, w in jd_section_weights.items():
+                sec_score = ce_section_scores.get(sec)
+                if isinstance(sec_score, (int,float)):
+                    # Calibrate same way as global (percentile) if possible using ce_p5 / ce_p95, treat raw similarly
+                    if use_percentile_ce:
+                        sec_norm = (sec_score - ce_p5) / ce_spread if ce_spread > 0 else 0.0
+                        sec_norm = 0.0 if sec_norm < 0 else (1.0 if sec_norm > 1 else sec_norm)
+                    else:
+                        sec_clamped = max(CE_SCORE_MIN_FIX, min(CE_SCORE_MAX_FIX, sec_score))
+                        sec_norm = (sec_clamped - CE_SCORE_MIN_FIX) / (CE_SCORE_MAX_FIX - CE_SCORE_MIN_FIX)
+                else:
+                    sec_norm = 0.0
+                contrib = w * sec_norm
+                weighted_section_sum += contrib
+                section_contributions.append((sec, sec_norm, contrib))
+
+            # Missing critical sections penalty
+            missing_critical = [sec for sec in critical_sections if not isinstance(ce_section_scores.get(sec), (int,float)) or ce_section_scores.get(sec) == 0]
+            penalty = penalty_per_missing * len(missing_critical)
+
+            # Combine components; allocate weights: keep existing high-level weights but add section CE
+            # Rebalance: treat ce_norm and weighted_section_sum as two CE facets splitting cross_encoder_weight
+            if cross_encoder_weight > 0:
+                ce_global_part = cross_encoder_weight * 0.5
+                ce_section_part = cross_encoder_weight * 0.5
+            else:
+                ce_global_part = ce_section_part = 0.0
+
+            if bm25_active:
+                base_combined = (
+                    vector_weight * vector_score +
+                    bm25_weight * bm25_norm +
+                    ce_global_part * ce_norm +
+                    ce_section_part * weighted_section_sum
                 )
             else:
-                # BM25 disabled or no scores: use 2-component blend
-                total_w = vector_weight + cross_encoder_weight
-                if total_w > 0:
-                    r["combined_score"] = (
-                        (vector_weight / total_w) * vector_score + 
-                        (cross_encoder_weight / total_w) * ce_norm
-                    )
+                # redistribute vector + CE parts proportionally if bm25 absent
+                avail = vector_weight + cross_encoder_weight
+                if avail > 0:
+                    vector_part = vector_weight / avail
+                    ce_total_part = cross_encoder_weight / avail
                 else:
-                    r["combined_score"] = vector_score
-            
-            # Store individual normalized scores for debugging
+                    vector_part = ce_total_part = 0.5
+                base_combined = (
+                    vector_part * vector_score +
+                    ce_total_part * (0.5 * ce_norm + 0.5 * weighted_section_sum)
+                )
+
+            adjusted_combined = max(base_combined - penalty, 0.0)
+
+            # Persist detailed components for interpretability
+            section_contributions_sorted = sorted(section_contributions, key=lambda x: x[2], reverse=True)
+            r["combined_score"] = adjusted_combined
             r["vector_score_normalized"] = vector_score
             r["bm25_score_normalized"] = bm25_norm
-            r["ce_score_normalized"] = ce_norm
-        
-        # Sort by combined score
-        results.sort(key=lambda x: x.get("combined_score", x.get("total_score", 0.0)), reverse=True)
+            r["ce_score_global_normalized"] = ce_norm
+            r["ce_section_weighted_score"] = weighted_section_sum
+            r["missing_critical_sections"] = missing_critical
+            r["penalty"] = penalty
+            r["score_components"] = {
+                "vector": vector_score,
+                "bm25_norm": bm25_norm,
+                "ce_global_norm": ce_norm,
+                "ce_section_weighted": weighted_section_sum,
+                "penalty": penalty,
+                "weights": {
+                    "vector_weight": vector_weight,
+                    "bm25_weight": bm25_weight if bm25_active else 0.0,
+                    "ce_global_part": ce_global_part if bm25_active else 0.5 * cross_encoder_weight,
+                    "ce_section_part": ce_section_part if bm25_active else 0.5 * cross_encoder_weight
+                }
+            }
+            r["top_section_contributions"] = [
+                {"section": sec, "normalized": norm, "weighted_contribution": contrib}
+                for sec, norm, contrib in section_contributions_sorted[:5]
+            ]
+            r["raw_scores"] = {
+                "vector": vector_score,
+                "bm25": bm25_val if isinstance(bm25_val, (int,float)) else None,
+                "cross_encoder": ce_raw if isinstance(ce_raw, (int,float)) else None
+            }
 
-        # Trim results to top_k_cvs after all scoring and sorting is complete
-        results = results[:top_k_cvs]
-        logger.info(f"Trimmed results to top {top_k_cvs} candidates")
+        # 5. Eligibility & skill feature extraction (dynamic threshold & calibration + mandatory/optional split)
+        taxonomy = SkillTaxonomy.load()
+        mandatory_skills, optional_skills = build_jd_skill_groups(jd_doc, taxonomy)
+        jd_required_skills = mandatory_skills  # for depth/recency reference
+        cv_doc_map = {str(cvd.get('_id')): cvd for cvd in cv_docs}
+        coverage_values = []
+        depth_raw_values = []
+        recency_raw_values = []
+        impact_raw_values = []
+        for r in results:
+            cid = r.get('cv_id')
+            cv_doc = cv_doc_map.get(cid, {})
+            cv_skill_set = build_cv_skill_set(cv_doc, taxonomy)
+            mandatory_cov, mandatory_missing, mandatory_detail = compute_skill_coverage(mandatory_skills, cv_skill_set, taxonomy)
+            optional_cov, optional_missing, optional_detail = compute_skill_coverage(optional_skills, cv_skill_set, taxonomy)
+            depth_meta = depth_indicators(cv_doc, jd_required_skills)
+            depth_score_raw = aggregate_depth_score(depth_meta, jd_required_skills)
+            recency_score_raw = improved_recency(cv_doc, jd_required_skills)
+            if recency_score_raw == 0:  # fallback if no dates
+                recency_score_raw = placeholder_recency(cv_doc, jd_required_skills)
+            # Impact extraction (raw only; NOT yet added to combined_score)
+            try:
+                impact_features = extract_impact_features(cv_doc)
+            except Exception as e_imp:
+                impact_features = {"impact_events": [], "raw_impact_score": 0.0, "impact_event_count": 0, "error": str(e_imp)}
+            r['skill_mandatory_coverage'] = mandatory_cov
+            r['skill_mandatory_missing'] = mandatory_missing
+            r['skill_mandatory_detail'] = mandatory_detail
+            r['skill_optional_coverage'] = optional_cov
+            r['skill_optional_missing'] = optional_missing
+            r['skill_optional_detail'] = optional_detail
+            r['skill_depth_score_raw'] = depth_score_raw
+            r['skill_depth_indicators'] = depth_meta
+            r['skill_recency_score_raw'] = recency_score_raw
+            r['impact_raw_score'] = impact_features.get('raw_impact_score', 0.0)
+            r['impact_event_count'] = impact_features.get('impact_event_count', 0)
+            if show_details:
+                r['impact_events'] = impact_features.get('impact_events', [])
+            coverage_values.append(mandatory_cov)
+            depth_raw_values.append(depth_score_raw)
+            recency_raw_values.append(recency_score_raw)
+            impact_raw_values.append(r['impact_raw_score'])
+        coverage_threshold = dynamic_coverage_threshold(coverage_values)
+        def _p_bounds(vals: list):
+            if not vals:
+                return 0.0, 1.0, 1.0
+            s = sorted(vals)
+            p5 = s[int(0.05 * (len(s)-1))]
+            p95 = s[int(0.95 * (len(s)-1))]
+            spread = p95 - p5 if p95 != p5 else 1.0
+            return p5, p95, spread
+        depth_p5, depth_p95, depth_spread = _p_bounds(depth_raw_values)
+        rec_p5, rec_p95, rec_spread = _p_bounds(recency_raw_values)
+        impact_p5, impact_p95, impact_spread = _p_bounds(impact_raw_values)
+        # Skill coverage bonus weights
+        MANDATORY_COVERAGE_BONUS_WEIGHT = 0.10
+        OPTIONAL_COVERAGE_BONUS_WEIGHT = 0.05
+        for r in results:
+            r['eligibility_gated_out'] = r['skill_mandatory_coverage'] < coverage_threshold
+            d_norm = (r['skill_depth_score_raw'] - depth_p5) / depth_spread
+            r['skill_depth_score'] = 0.0 if d_norm < 0 else (1.0 if d_norm > 1 else d_norm)
+            rr_norm = (r['skill_recency_score_raw'] - rec_p5) / rec_spread
+            r['skill_recency_score'] = 0.0 if rr_norm < 0 else (1.0 if rr_norm > 1 else rr_norm)
+            ir_norm = (r['impact_raw_score'] - impact_p5) / impact_spread
+            r['impact_score'] = 0.0 if ir_norm < 0 else (1.0 if ir_norm > 1 else ir_norm)
+            if not r['eligibility_gated_out']:
+                skill_bonus = (
+                    r['skill_mandatory_coverage'] * MANDATORY_COVERAGE_BONUS_WEIGHT +
+                    r['skill_optional_coverage'] * OPTIONAL_COVERAGE_BONUS_WEIGHT
+                )
+                r['combined_score'] = r.get('combined_score', r.get('total_score', 0.0)) + skill_bonus
+                sc = r.get('score_components') or {}
+                sc['skill_bonus'] = skill_bonus
+                sc['skill_mandatory_coverage'] = r['skill_mandatory_coverage']
+                sc['skill_optional_coverage'] = r['skill_optional_coverage']
+                # NOTE: Impact score intentionally excluded from combined_score until Phase 2 integration.
+                sc['impact_raw_score'] = r.get('impact_raw_score')
+                sc['impact_score_calibrated'] = r.get('impact_score')
+                r['score_components'] = sc
+        # Sort full set once
+        results.sort(key=lambda x: x.get('combined_score', x.get('total_score', 0.0)), reverse=True)
+        gated_ids = [r['cv_id'] for r in results if r.get('eligibility_gated_out')]
+        eligible_results = [r for r in results if not r.get('eligibility_gated_out')]
+        fill_used = 0
+        # If we don't have enough eligible candidates to satisfy top_k, backfill with gated ones (clearly marked)
+        if len(eligible_results) < top_k_cvs and gated_ids:
+            deficit = top_k_cvs - len(eligible_results)
+            backfill = [r for r in results if r.get('eligibility_gated_out')][:deficit]
+            for bf in backfill:
+                bf['eligibility_backfilled'] = True  # mark explicitly
+            eligible_results.extend(backfill)
+            fill_used = len(backfill)
+        results = eligible_results[:top_k_cvs]
+        logger.info(
+            f"Final candidate selection top_k={top_k_cvs} eligible={len(eligible_results)-fill_used} backfilled={fill_used} gated_out_total={len(gated_ids)} coverage_threshold={coverage_threshold}"
+            f" depth_calib=({depth_p5:.3f},{depth_p95:.3f}) recency_calib=({rec_p5:.3f},{rec_p95:.3f})"
+        )
 
         # Fetch actual identifiers (email/phone) from MongoDB for each CV
         # Use the multi-tenant database (company-specific) to get real identifiers
@@ -1009,6 +1220,9 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             except Exception as e:
                 logger.warning(f"Failed to lookup identifier for cv_id {cv_id}: {e}")
             
+            section_scores_to_use = result.get("cross_encoder_section_scores", result["section_scores"])
+            logger.info(f"CV {cv_id[:8]}... section_scores keys: {list(section_scores_to_use.keys()) if section_scores_to_use else 'None'}")
+            
             response.append({
                 "cv_id": cv_id,
                 "original_identifier": original_identifier,
@@ -1018,7 +1232,7 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
                 "cross_encoder_score": result.get("cross_encoder_score"),
                 "combined_score": result.get("combined_score"),
                 "ce_status": result.get("ce_status"),
-                "section_scores": result.get("cross_encoder_section_scores", result["section_scores"]),
+                "section_scores": section_scores_to_use,
                 "section_details": result["section_details"] if show_details else {}
             })
         
@@ -1041,8 +1255,40 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
                 "cross_encoder_weight": cross_encoder_weight
             },
             "jd_id_used": jd_id_used,
-            "total_results": len(results),
-            "reranker_meta": reranker_meta
+            "total_results_returned": len(results),
+            "total_results_full": len(results_full),
+            "reranker_meta": reranker_meta,
+            "bm25_normalization": {
+                "method": "saturation",
+                "k": bm25_k,
+                "active": bm25_active,
+                "score_count": len(bm25_scores_list)
+            },
+            "ce_calibration": {
+                "percentile_mode": use_percentile_ce,
+                "p5": ce_p5,
+                "p95": ce_p95,
+                "spread": ce_spread
+            },
+            "section_weighting": jd_section_weights,
+            "critical_sections": critical_sections,
+            "penalty_per_missing_critical": penalty_per_missing,
+            "eligibility": {
+                "coverage_threshold": coverage_threshold,
+                "required_skills_extracted": list(mandatory_skills),
+                "optional_skills_extracted": list(optional_skills),
+                "gated_out_count": len(gated_ids),
+                "gated_out_ids": gated_ids
+            },
+            "skill_bonus_weights": {
+                "mandatory_coverage_bonus_weight": MANDATORY_COVERAGE_BONUS_WEIGHT,
+                "optional_coverage_bonus_weight": OPTIONAL_COVERAGE_BONUS_WEIGHT
+            },
+            "impact_calibration": {
+                "p5": impact_p5 if 'impact_p5' in locals() else None,
+                "p95": impact_p95 if 'impact_p95' in locals() else None,
+                "spread": impact_spread if 'impact_spread' in locals() else None
+            }
         }
         # Ensure MongoDB connections are closed
         try:
@@ -1053,12 +1299,37 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         except Exception as e:
             logger.warning(f"Error closing search connections: {e}")
 
+        # Enhance response entries with skill metrics (post-filtered)
+        for entry in response:
+            r_match = next((r for r in results if r.get('cv_id') == entry['cv_id']), None)
+            if r_match:
+                entry['skill_mandatory_coverage'] = r_match.get('skill_mandatory_coverage')
+                entry['skill_mandatory_missing'] = r_match.get('skill_mandatory_missing')
+                entry['skill_optional_coverage'] = r_match.get('skill_optional_coverage')
+                entry['skill_optional_missing'] = r_match.get('skill_optional_missing')
+                entry['skill_depth_score'] = r_match.get('skill_depth_score')
+                entry['skill_recency_score'] = r_match.get('skill_recency_score')
+                entry['skill_mandatory_detail'] = r_match.get('skill_mandatory_detail')
+                entry['skill_optional_detail'] = r_match.get('skill_optional_detail')
+                # Impact fields (raw + calibrated); detailed events only if show_details requested
+                entry['impact_raw_score'] = r_match.get('impact_raw_score')
+                entry['impact_score'] = r_match.get('impact_score')
+                entry['impact_event_count'] = r_match.get('impact_event_count')
+                if show_details:
+                    entry['impact_events'] = r_match.get('impact_events', [])
+                if show_details:
+                    entry['skill_depth_indicators'] = r_match.get('skill_depth_indicators')
+                    entry['skill_depth_score_raw'] = r_match.get('skill_depth_score_raw')
+                    entry['skill_recency_score_raw'] = r_match.get('skill_recency_score_raw')
+
         return JSONResponse(content={
             "status": "success",
             "results": response,
             "company_name": company_name,
             "job_title": job_title,
             "jd_id_used": jd_id_used,
+            "rerank_mode": rerank_mode,
+            "cross_encoder_enabled": enable_cross_encoder and reranker is not None,
             "meta": meta
         })
     except HTTPException as e:
@@ -1343,7 +1614,12 @@ async def bulk_delete_cvs(
     
     try:
         # Build collection and DB names
-        _, cv_persist_dir = build_persist_directories(company_name, job_title)
+        # build_persist_directories expects (cv_root, jd_root, company)
+        cv_persist_dir, _ = build_persist_directories(
+            config["chroma"]["cv_persist_dir"],
+            config["chroma"]["jd_persist_dir"],
+            company_name
+        )
         cv_mongo_db, cv_mongo_coll, _ = build_mongo_names(company_name, job_title)
         
         # Delete from MongoDB
@@ -1396,7 +1672,11 @@ async def bulk_delete_jds(
             deleted_count = result.deleted_count
             
             # Delete JD ChromaDB
-            jd_persist_dir, _ = build_persist_directories(company_name, job_title)
+            jd_persist_dir, _ = build_persist_directories(
+                config["chroma"]["cv_persist_dir"],
+                config["chroma"]["jd_persist_dir"],
+                company_name
+            )
             import chromadb
             chroma_client = chromadb.PersistentClient(path=jd_persist_dir)
             _, jd_coll_name = build_collection_names(company_name, job_title)
@@ -1491,7 +1771,11 @@ async def reindex_embeddings(
                 cvs = list(db[coll_name].find({}))
                 if cvs:
                     # Rebuild embeddings
-                    jd_persist_dir, cv_persist_dir = build_persist_directories(company_name, job_title)
+                    jd_persist_dir, cv_persist_dir = build_persist_directories(
+                        config["chroma"]["cv_persist_dir"],
+                        config["chroma"]["jd_persist_dir"],
+                        company_name
+                    )
                     embedder = CVEmbedder(
                         model=config["embedding"]["model"],
                         persist_directory=cv_persist_dir,
@@ -1511,7 +1795,11 @@ async def reindex_embeddings(
                 
                 jds = list(db[coll_name].find({}))
                 if jds:
-                    jd_persist_dir, _ = build_persist_directories(company_name, job_title)
+                    jd_persist_dir, _ = build_persist_directories(
+                        config["chroma"]["cv_persist_dir"],
+                        config["chroma"]["jd_persist_dir"],
+                        company_name
+                    )
                     embedder = JDEmbedder(
                         model=config["embedding"]["model"],
                         persist_directory=jd_persist_dir,

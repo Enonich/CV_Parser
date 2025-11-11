@@ -142,36 +142,43 @@ class BM25Scorer:
         
         return scores
     
-    def score_with_normalization(
-        self, 
-        query_text: str, 
+    def score_with_saturation(
+        self,
+        query_text: str,
         corpus_texts: List[str],
-        normalize: bool = True
-    ) -> List[float]:
-        """Compute BM25 scores with optional min-max normalization.
-        
+        k_strategy: str = "median",
+        min_k: float = 1.0
+    ) -> Tuple[List[float], float]:
+        """Compute BM25 scores then apply saturation normalization.
+
+        Saturation formula: norm = raw / (raw + k)
+        Where k is chosen for stability across subsets.
+
         Args:
-            query_text: Query text
-            corpus_texts: List of document texts
-            normalize: If True, normalize scores to [0, 1] range
-            
+            query_text: Query text (JD aggregate)
+            corpus_texts: List of CV texts
+            k_strategy: How to choose k ("median" | "mean" | numeric string)
+            min_k: Floor value to prevent division explosion
         Returns:
-            List of (normalized) BM25 scores
+            (normalized_scores, k_used)
         """
-        scores = self.score(query_text, corpus_texts)
-        
-        if not normalize or not scores:
-            return scores
-        
-        # Min-max normalization
-        min_score = min(scores)
-        max_score = max(scores)
-        
-        if max_score == min_score:
-            return [0.0] * len(scores)
-        
-        normalized = [(s - min_score) / (max_score - min_score) for s in scores]
-        return normalized
+        raw_scores = self.score(query_text, corpus_texts)
+        if not raw_scores:
+            return ([0.0] * len(corpus_texts), min_k)
+        # Determine k
+        try:
+            if k_strategy == "median":
+                import statistics
+                k_val = statistics.median(raw_scores)
+            elif k_strategy == "mean":
+                k_val = sum(raw_scores) / max(len(raw_scores), 1)
+            else:
+                k_val = float(k_strategy)
+        except Exception:
+            k_val = sum(raw_scores) / max(len(raw_scores), 1)
+        k_val = max(k_val, min_k)
+        normalized = [ (s / (s + k_val)) if s > 0 else 0.0 for s in raw_scores ]
+        return normalized, k_val
 
 
 class CVJDReranker:
@@ -354,31 +361,25 @@ class CVJDReranker:
         self,
         jd_text: str,
         cv_texts: List[str],
-        normalize: bool = True
-    ) -> List[float]:
-        """Compute BM25 scores for CV texts against JD text.
-        
-        Args:
-            jd_text: Job description text (query)
-            cv_texts: List of CV texts (corpus)
-            normalize: If True, normalize scores to [0, 1] range
-            
-        Returns:
-            List of BM25 scores
+        k_strategy: str = "median"
+    ) -> Tuple[List[float], float]:
+        """Compute BM25 saturation-normalized scores and k.
+
+        Returns tuple (scores, k_used).
         """
         if not jd_text or not cv_texts:
-            return [0.0] * len(cv_texts)
-        
+            return ([0.0] * len(cv_texts), 1.0)
         try:
-            scores = self.bm25_scorer.score_with_normalization(
+            scores, k_val = self.bm25_scorer.score_with_saturation(
                 query_text=jd_text,
                 corpus_texts=cv_texts,
-                normalize=normalize
+                k_strategy=k_strategy,
+                min_k=1.0
             )
-            return scores
+            return scores, k_val
         except Exception as e:
-            logger.error(f"BM25 scoring failed: {e}")
-            return [0.0] * len(cv_texts)
+            logger.error(f"BM25 saturation scoring failed: {e}")
+            return ([0.0] * len(cv_texts), 1.0)
 
     # ========================================
     # DOCUMENT FETCHING (IMPROVED)
@@ -516,17 +517,18 @@ class CVJDReranker:
         pairs = [[jd_text, cv_text] for cv_text in cv_texts]
         ce_scores = self._score_pairs(pairs, batch_size)
         ce_scores = self._calibrate_scores(ce_scores, calibrate)
-        
-        # Compute BM25 scores
-        bm25_scores = self._compute_bm25_scores(jd_text, cv_texts, normalize=True)
-        
+
+        # Compute BM25 scores (saturation normalized)
+        bm25_scores, bm25_k = self._compute_bm25_scores(jd_text, cv_texts, k_strategy="median")
+        meta["bm25_normalization"] = {"method": "saturation", "k": bm25_k, "strategy": "median"}
+
         # Assign scores to results
         for result, ce_score, bm25_score in zip(valid_results, ce_scores, bm25_scores):
             result["cross_encoder_score"] = float(ce_score)
             result["bm25_score"] = float(bm25_score)
 
         # Compute per-section cross-encoder scores
-        section_ce_scores = {}
+        section_ce_scores: Dict[str, List[float]] = {}
         for jd_field in JD_FIELDS:
             jd_section_text = self._build_text_from_doc(jd_doc, [jd_field])
             if jd_section_text:
@@ -543,8 +545,8 @@ class CVJDReranker:
         sorted_results = sorted(cv_results, key=lambda x: x.get("cross_encoder_score", 0.0), reverse=True)
         if with_meta:
             if cv_texts:
-                meta["avg_cv_char_len"] = sum(len(t) for t in cv_texts)/len(cv_texts)
-                meta["avg_cv_token_est"] = sum(self._estimate_tokens(t) for t in cv_texts)/len(cv_texts)
+                meta["avg_cv_char_len"] = sum(len(t) for t in cv_texts) / len(cv_texts)
+                meta["avg_cv_token_est"] = sum(self._estimate_tokens(t) for t in cv_texts) / len(cv_texts)
             return sorted_results, meta
         return sorted_results
 
@@ -645,19 +647,20 @@ class CVJDReranker:
         pairs = [[jd_text, cv_text] for cv_text in cv_texts]
         ce_scores = self._score_pairs(pairs, batch_size)
         ce_scores = self._calibrate_scores(ce_scores, calibrate)
-        
-        # Compute BM25 scores
-        bm25_scores = self._compute_bm25_scores(jd_text, cv_texts, normalize=True)
-        
+
+        # Compute BM25 scores (saturation normalized)
+        bm25_scores, bm25_k = self._compute_bm25_scores(jd_text, cv_texts, k_strategy="median")
+        meta["bm25_normalization"] = {"method": "saturation", "k": bm25_k, "strategy": "median"}
+
         # Assign scores to results
         for result, ce_score, bm25_score in zip(valid_results, ce_scores, bm25_scores):
             result["cross_encoder_score"] = float(ce_score)
             result["bm25_score"] = float(bm25_score)
-        
+
         cv_results.sort(key=lambda x: x.get("cross_encoder_score", 0.0), reverse=True)
         if cv_texts:
-            meta["avg_cv_char_len"] = sum(len(t) for t in cv_texts)/len(cv_texts)
-            meta["avg_cv_token_est"] = sum(self._estimate_tokens(t) for t in cv_texts)/len(cv_texts)
+            meta["avg_cv_char_len"] = sum(len(t) for t in cv_texts) / len(cv_texts)
+            meta["avg_cv_token_est"] = sum(self._estimate_tokens(t) for t in cv_texts) / len(cv_texts)
         if with_meta:
             return cv_results, meta
         logger.info(f"✅ Reranked {len(cv_results)} CVs for company='{company_name}' job='{job_title}'")
@@ -762,19 +765,20 @@ class CVJDReranker:
         pairs = [[jd_text, cv_text] for cv_text in cv_texts]
         ce_scores = self._score_pairs(pairs, batch_size)
         ce_scores = self._calibrate_scores(ce_scores, calibrate)
-        
-        # Compute BM25 scores
-        bm25_scores = self._compute_bm25_scores(jd_text, cv_texts, normalize=True)
-        
+
+        # Compute BM25 scores (saturation normalized)
+        bm25_scores, bm25_k = self._compute_bm25_scores(jd_text, cv_texts, k_strategy="median")
+        meta["bm25_normalization"] = {"method": "saturation", "k": bm25_k, "strategy": "median"}
+
         # Assign scores to results
         for result, ce_score, bm25_score in zip(valid_results, ce_scores, bm25_scores):
             result["cross_encoder_score"] = float(ce_score)
             result["bm25_score"] = float(bm25_score)
-        
+
         cv_results.sort(key=lambda x: x.get("cross_encoder_score", 0.0), reverse=True)
         if cv_texts:
-            meta["avg_cv_char_len"] = sum(len(t) for t in cv_texts)/len(cv_texts)
-            meta["avg_cv_token_est"] = sum(self._estimate_tokens(t) for t in cv_texts)/len(cv_texts)
+            meta["avg_cv_char_len"] = sum(len(t) for t in cv_texts) / len(cv_texts)
+            meta["avg_cv_token_est"] = sum(self._estimate_tokens(t) for t in cv_texts) / len(cv_texts)
         if with_meta:
             return cv_results, meta
         logger.info(f"✅ Reranked {len(cv_results)} CVs using jd_id='{jd_id}' company='{company_name}' job='{job_title}'")
