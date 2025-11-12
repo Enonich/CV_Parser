@@ -1,0 +1,51 @@
+# Canonical skill taxonomy (seed version)
+# Extend over time; families allow partial credit for adjacency.
+skills:
+  python:
+    aliases: ["python3", "py"]
+    families: ["backend", "data"]
+  javascript:
+    aliases: ["js", "nodejs", "node"]
+    families: ["backend", "frontend"]
+  typescript:
+    aliases: ["ts"]
+    families: ["frontend", "backend"]
+  aws:
+    aliases: ["amazon web services", "aws cloud"]
+    families: ["cloud"]
+  azure:
+    aliases: ["microsoft azure"]
+    families: ["cloud"]
+  gcp:
+    aliases: ["google cloud", "google cloud platform"]
+    families: ["cloud"]
+  postgresql:
+    aliases: ["postgres", "psql"]
+    families: ["database"]
+  mysql:
+    aliases: ["mariaDB"]
+    families: ["database"]
+  mongodb:
+    aliases: ["mongo", "documentdb"]
+    families: ["database", "nosql"]
+  docker:
+    aliases: ["containers"]
+    families: ["devops"]
+  kubernetes:
+    aliases: ["k8s"]
+    families: ["devops"]
+families:
+  backend:
+    related: ["api", "microservices"]
+  frontend:
+    related: ["ui", "react", "vue"]
+  data:
+    related: ["analytics", "etl", "pandas"]
+  cloud:
+    related: ["infrastructure", "devops"]
+  database:
+    related: ["sql", "data"]
+  nosql:
+    related: ["database", "distributed"]
+  devops:
+    related: ["automation", "cloud"]

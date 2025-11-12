@@ -102,5 +102,29 @@ class TestImpactExtraction(unittest.TestCase):
         score_big, _ = _score_event(verbs_big, metrics_big, None)
         self.assertGreater(score_big, score_base)
 
+    def test_range_percent_parsing(self):
+        sentence = "Improved conversion rate 12-18% quarter over quarter"
+        metrics = _extract_metrics(sentence)
+        percent_metrics = [m for m in metrics if m['type'] == 'percent']
+        self.assertTrue(any('12-18%' in m['raw'] for m in percent_metrics))
+        # midpoint should be (12+18)/2 = 15
+        mid_metric = next(m for m in percent_metrics if '12-18%' in m['raw'])
+        self.assertEqual(mid_metric['value'], 15)
+
+    def test_textual_number_currency(self):
+        sentence = "Secured two million in new revenue"
+        metrics = _extract_metrics(sentence)
+        currency = [m for m in metrics if m['type'] == 'currency']
+        self.assertTrue(any('two million' in m['raw'] for m in currency))
+        val = next(m for m in currency if 'two million' in m['raw'])['value']
+        self.assertEqual(val, 2_000_000)
+
+    def test_context_classification(self):
+        sentence = "Reduced cost by $300K while increasing revenue 20%"
+        metrics = _extract_metrics(sentence)
+        contexts = {m['context'] for m in metrics if m.get('context')}
+        self.assertIn('cost', contexts)
+        self.assertIn('revenue', contexts)
+
 if __name__ == '__main__':
     unittest.main()

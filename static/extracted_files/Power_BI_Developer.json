@@ -2,7 +2,7 @@
   "CV_data": {
     "structured_data": {
       "name": "Enoch Kwadwo Aidoo",
-      "email": "aidoenochkwadwo@gmail.com",
+      "email": "aidooenochkwadwo@gmail.com",
       "phone": "0240542834",
       "summary": "A Data Analyst with about two years of professional experience specialized in transforming complex datasets into strategic business solutions. I've consistently delivered actionable insights that have driven key business decisions. Combining strong analytical skills with business acumen, I excel at identifying data patterns and translating them into clear, implementable strategies that solve real-world challenges.",
       "work_experience": [
@@ -55,15 +55,18 @@
         "Data Analysis",
         "Classification Modeling",
         "Deep Neural Networks",
-        "Regression Modeling",
+        "Regression Modelling",
         "MLOps",
         "Computer Vision",
         "Natural Language Processing",
         "Recommendation Systems",
-        "Dashboard Design & User Experience Optimization",
-        "Advanced DAX calculations and measures",
-        "Data modeling and relationship management",
-        "Power Query for data transformation",
+        "Dashboard Design",
+        "User Experience Optimization",
+        "Advanced DAX calculations",
+        "Data modeling",
+        "Relationship management",
+        "Power Query",
+        "Data transformation",
         "Cross-platform data integration"
       ],
       "soft_skills": [
@@ -93,7 +96,7 @@
           "date": "Oct 2021"
         },
         {
-          "name": "Machine Learning",
+          "name": "Machine Learning (by Andrew Ng)",
           "issuing_organization": "Stanford University on Coursera",
           "date": "Present"
         },
@@ -110,28 +113,27 @@
       ],
       "projects": [
         {
-          "name": "Interactive Dashboards for Machine Learning Algorithms",
+          "name": "",
           "description": "Leveraged SQL and Power BI skills to design interactive dashboards that visualized complex data patterns, generating actionable insights for downstream machine learning algorithms and business decision-making.",
           "technologies": [
             "SQL",
-            "Power BI",
-            "Machine Learning"
+            "Power BI"
           ]
         },
         {
-          "name": "Predictive Model for Quantitative Finance",
+          "name": "",
           "description": "Analyzed past market data and built a predictive model for quantitative finance with a validation MSE of about 0.998 to improve risk forecasting.",
           "technologies": []
         },
         {
-          "name": "SQL-based Analysis for Water Infrastructure",
+          "name": "",
           "description": "Led SQL-based analysis of 60,000+ water infrastructure records to identify critical gaps in community water access, utilizing advanced SQL functions and data aggregation techniques to deliver actionable recommendations for infrastructure improvements and resource allocation.",
           "technologies": [
             "SQL"
           ]
         },
         {
-          "name": "Stakeholder-Driven Power BI Dashboards",
+          "name": "",
           "description": "Built stakeholder-driven Power BI dashboards with advanced DAX calculations and multi-level drill-down functionality to track water project progress, budget performance, and community impact across national, provincial, and local levels.",
           "technologies": [
             "Power BI",
@@ -142,9 +144,9 @@
       "languages": [],
       "hobbies": [],
       "other": "",
-      "years_of_experience": 1.92,
-      "company_name": "Really Great Tech",
-      "job_title": "Data Analyst"
+      "years_of_experience": 2.0,
+      "company_name": "Google",
+      "job_title": "Mobile Application Developer"
     }
   }
 }

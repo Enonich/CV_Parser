@@ -272,10 +272,14 @@ Responsibilities:
     <section id="search" class="hidden">
       <h2 class="text-3xl font-bold mb-8">Search & Rank Candidates</h2>
       <div class="bg-white p-6 rounded-lg shadow-sm border mb-6">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label class="block text-sm font-medium text-gray-700">Job Title</label>
             <select id="search-job" class="mt-1 block w-full border rounded-md px-3 py-2"></select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Number of Candidates</label>
+            <input type="number" id="search-top-k" min="1" max="100" value="10" class="mt-1 block w-full border rounded-md px-3 py-2" />
           </div>
           <div class="flex items-end">
             <button id="search-btn" class="bg-blue-700 text-white px-6 py-2 rounded-lg hover:bg-blue-800 disabled:bg-gray-400 disabled:cursor-not-allowed w-full flex items-center justify-center space-x-2 transition-colors">
