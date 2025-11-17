@@ -76,11 +76,26 @@ OUTCOME_CONNECTORS = [
 ]
 
 PERCENT_PATTERN = re.compile(r"\b(\d{1,3}(?:\.\d+)?)%\b")
+# Range pattern MUST include trailing % after second number to treat as percent range
+RANGE_PATTERN = re.compile(r"(\d{1,3}(?:\.\d+)?)\s*[-–]\s*(\d{1,3}(?:\.\d+)?)%")
 NUMBER_WITH_QUALIFIER_PATTERN = re.compile(
-    r"\b(\$?\d{1,3}(?:[\,\d]{0,3})?(?:\.\d+)?\s*(?:k|m|b|million|billion|thousand)?)\b",
+    r"\b(\$?\d{1,3}(?:[\,\d]{0,3})?(?:\.\d+)?\s*(?:k|m|b|million|billion|thousand))\b",
     re.IGNORECASE
 )
-PLAIN_INTEGER_PATTERN = re.compile(r"\b\d{1,6}\b")
+PLAIN_INTEGER_PATTERN = re.compile(r"\b\d{1,9}\b")
+TEXTUAL_NUMBER_MAP = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9,
+    "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15,
+    "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70,
+    "eighty": 80, "ninety": 90,
+    "hundred": 100, "thousand": 1000, "million": 1_000_000, "billion": 1_000_000_000
+}
+
+CONTEXT_KEYWORDS = {
+    "revenue": "revenue", "arr": "revenue", "sales": "revenue", "pipeline": "revenue",
+    "cost": "cost", "expense": "cost", "expenses": "cost", "downtime": "time", "latency": "time",
+    "hours": "time", "time": "time", "customers": "customers", "users": "users", "transactions": "transactions"
+}
 
 DECREASE_VERBS = {"reduced", "decreased", "cut", "lowered", "saved", "eliminated"}
 INCREASE_VERBS = {"increased", "grew", "expanded", "boosted", "accelerated", "scaled"}
@@ -120,6 +135,16 @@ def _normalize_percent(p: str) -> Optional[float]:
 
 def _extract_metrics(sentence: str) -> List[Dict[str, Any]]:
     metrics: List[Dict[str, Any]] = []
+    lower = sentence.lower()
+    # Percent ranges (take midpoint)
+    for match in RANGE_PATTERN.finditer(sentence):
+        a, b = match.group(1), match.group(2)
+        try:
+            v1 = float(a); v2 = float(b)
+            mid = (v1 + v2) / 2.0
+            metrics.append({"raw": f"{a}-{b}%", "value": mid, "type": "percent", "normalized": mid / 50.0})
+        except ValueError:
+            pass
     # Percentages
     for m in PERCENT_PATTERN.findall(sentence):
         val = _normalize_percent(m + '%')
@@ -130,18 +155,57 @@ def _extract_metrics(sentence: str) -> List[Dict[str, Any]]:
         val = _normalize_currency(m)
         if val is not None:
             metrics.append({"raw": m, "value": val, "type": "currency", "normalized": min(val / 1000.0, 10000.0)})
+    # Textual numbers followed by contextual keywords (e.g., "ten percent", "two million")
+    tokens = re.split(r"\s+", lower)
+    for i, tok in enumerate(tokens):
+        if tok in TEXTUAL_NUMBER_MAP:
+            # Basic textual number (no chaining multiplication beyond single scale word)
+            base = TEXTUAL_NUMBER_MAP[tok]
+            nxt = tokens[i+1] if i+1 < len(tokens) else ''
+            value = base
+            raw_form = tok
+            # Percent handling ("ten percent")
+            if nxt.startswith('percent') or nxt == 'pct':
+                metrics.append({"raw": raw_form + "%", "value": value, "type": "percent", "normalized": value / 50.0})
+                continue
+            # Currency scale ("two million")
+            if nxt in ['million','billion','thousand']:
+                mult = QUALIFIER_MAP.get(nxt, 1)
+                value = base * mult
+                raw_form += f" {nxt}"
+                metrics.append({"raw": raw_form, "value": value, "type": "currency", "normalized": min(value / 1000.0, 10000.0)})
+                continue
     # Plain counts (avoid duplicates of currency numbers)
-    # Heuristic: only include integers > 10 and not already part of a currency pattern
-    existing_raws = {mm["raw"] for mm in metrics}
+    existing_raws = {mm["raw"].lower() for mm in metrics}
     for m in PLAIN_INTEGER_PATTERN.findall(sentence):
-        if m in existing_raws:
+        if m.lower() in existing_raws:
             continue
         try:
             val = int(m)
-            if val > 10:  # ignore trivial counts
+            if val > 10:
                 metrics.append({"raw": m, "value": val, "type": "count", "normalized": min(val, 100000)})
         except ValueError:
             continue
+    # Add simple context classification to each metric
+    for metric in metrics:
+        metric['context'] = None
+        metric_pos = lower.find(metric['raw'].lower())
+        if metric_pos == -1:
+            continue
+
+        best_dist = float('inf')
+        best_context = None
+
+        for kw, cls in CONTEXT_KEYWORDS.items():
+            kw_pos = lower.find(kw)
+            while kw_pos != -1:
+                dist = abs(metric_pos - kw_pos)
+                if dist < best_dist:
+                    best_dist = dist
+                    best_context = cls
+                kw_pos = lower.find(kw, kw_pos + 1)
+        
+        metric['context'] = best_context
     return metrics
 
 
@@ -185,12 +249,24 @@ def _score_event(verbs: List[str], metrics: List[Dict[str, Any]], outcome_phrase
     direction = _direction(verbs)
     # Favor improvements (increase revenue, decrease cost) – simple multiplier
     direction_modifier = 1.1 if direction in {"increase", "decrease"} else 1.0
+    # Context emphasis: revenue gains or cost reductions amplify metric slightly (cap total multiplier)
+    has_revenue = any(m.get('context') == 'revenue' for m in metrics)
+    has_cost = any(m.get('context') == 'cost' for m in metrics)
+    context_multiplier = 1.0
+    if has_revenue:
+        context_multiplier += 0.05
+    if has_cost:
+        context_multiplier += 0.05
+    if context_multiplier > 1.1:
+        context_multiplier = 1.1
     event_score = verb_weight * (1.0 + math.log(1.0 + metric_magnitude)) * outcome_bonus * direction_modifier
+    event_score *= context_multiplier
     return event_score, {
         "verb_weight": verb_weight,
         "metric_magnitude": metric_magnitude,
         "outcome_bonus": outcome_bonus,
-        "direction_modifier": direction_modifier
+        "direction_modifier": direction_modifier,
+        "context_multiplier": context_multiplier
     }
 
 

@@ -37,7 +37,13 @@ from backend.core.feature_extraction import (
     improved_recency,
     dynamic_coverage_threshold,
 )
+from backend.core.feature_persistence import persist_features
 from backend.extractors.impact_extraction import extract_impact_features
+from backend.core.impact_relevance import compute_impact_relevance  # impact relevance to mandatory skills
+from backend.core.scoring_utils import apply_skill_and_impact_adjustments  # factored scoring adjustments
+from backend.core.semantic_skill_matcher import load_skill_semantic_cache  # semantic cache builder
+from langchain_ollama import OllamaEmbeddings
+from langchain_chroma import Chroma
 import logging
 
 # Configure logging
@@ -155,6 +161,115 @@ def _enforce_company_access(company_name: str, current_user: Dict[str, Any]):
         # Raw names stored; compare case-insensitive
         if company_name.lower().strip() not in {c.lower().strip() for c in allowed}:
             raise HTTPException(status_code=403, detail="Access to company denied")
+
+# ===================== Helper Utilities (Efficiency & Deduplication) =====================
+
+def serialize_datetime(obj: Any) -> Any:
+    """Recursively convert datetime objects to ISO strings (used for JD/CV temp serialization)."""
+    if isinstance(obj, dict):
+        return {k: serialize_datetime(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [serialize_datetime(v) for v in obj]
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    return obj
+
+def percentile_bounds(values: List[float]) -> tuple[float, float, float]:
+    if not values:
+        return 0.0, 1.0, 1.0
+    s = sorted(values)
+    p5 = s[int(0.05 * (len(s) - 1))]
+    p95 = s[int(0.95 * (len(s) - 1))]
+    spread = p95 - p5 if p95 != p5 else 1.0
+    return p5, p95, spread
+
+def percentile_calibrate(raw: float, p5: float, spread: float) -> float:
+    if spread <= 1e-12:
+        return 0.0
+    norm = (raw - p5) / spread
+    return 0.0 if norm < 0 else (1.0 if norm > 1 else norm)
+
+_embedding_model_name = config.get("embedding", {}).get("model", "mxbai-embed-large")
+_global_embeddings = OllamaEmbeddings(model=_embedding_model_name)
+
+def ensure_jd_embedded(jd_doc: Dict[str, Any], jd_id: str, jd_collection_name: str, jd_persist_dir: str) -> int:
+    """Ensure JD collection has embeddings; embed only if empty. Returns document count."""
+    os.makedirs(jd_persist_dir, exist_ok=True)
+    try:
+        vs = Chroma(collection_name=jd_collection_name, embedding_function=_global_embeddings, persist_directory=jd_persist_dir)
+        doc_count = vs._collection.count()
+    except Exception:
+        doc_count = 0
+    if doc_count > 0:
+        return doc_count
+    # Need to embed
+    temp_path = f"./static/extracted_files/temp_jd_{jd_id}.json"
+    try:
+        jd_serialized = serialize_datetime(jd_doc)
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(jd_serialized, f, indent=2)
+        jd_embedder_dyn = JDEmbedder(model=_embedding_model_name, persist_directory=jd_persist_dir, collection_name=jd_collection_name)
+        if not jd_embedder_dyn.embed_job_description_from_json(temp_path):
+            raise RuntimeError("JD embedding failed")
+        return Chroma(collection_name=jd_collection_name, embedding_function=_global_embeddings, persist_directory=jd_persist_dir)._collection.count()
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+def ensure_cv_embeddings(cv_docs: List[Dict[str, Any]], cv_collection_name: str, cv_persist_dir: str) -> Dict[str, Any]:
+    """Embed only missing CVs (identified by cv_id). Returns stats dict."""
+    os.makedirs(cv_persist_dir, exist_ok=True)
+    stats = {"existing_docs": 0, "existing_unique_cv_ids": 0, "embedded_now": 0, "failed": []}
+    try:
+        vs = Chroma(collection_name=cv_collection_name, embedding_function=_global_embeddings, persist_directory=cv_persist_dir)
+        stats["existing_docs"] = vs._collection.count()
+        try:
+            raw = vs.get()
+            unique_ids = set()
+            for m in raw.get('metadatas', []) or []:
+                cid = m.get('cv_id') if isinstance(m, dict) else None
+                if cid:
+                    unique_ids.add(cid)
+            stats["existing_unique_cv_ids"] = len(unique_ids)
+        except Exception:
+            stats["existing_unique_cv_ids"] = 0
+    except Exception:
+        stats["existing_docs"] = 0
+        stats["existing_unique_cv_ids"] = 0
+    # Determine missing IDs
+    mongo_ids = [str(doc.get('_id')) for doc in cv_docs]
+    embedded_ids = set()
+    if stats["existing_unique_cv_ids"] > 0:
+        try:
+            vs2 = Chroma(collection_name=cv_collection_name, embedding_function=_global_embeddings, persist_directory=cv_persist_dir)
+            raw2 = vs2.get()
+            for m in raw2.get('metadatas', []) or []:
+                cid = m.get('cv_id') if isinstance(m, dict) else None
+                if cid:
+                    embedded_ids.add(cid)
+        except Exception:
+            embedded_ids = set()
+    missing = [doc for doc in cv_docs if str(doc.get('_id')) not in embedded_ids]
+    if not missing:
+        return stats
+    embedder = CVEmbedder(model=_embedding_model_name, persist_directory=cv_persist_dir, collection_name=cv_collection_name)
+    for idx, doc in enumerate(missing, 1):
+        cv_id = str(doc.get('_id'))
+        temp_path = f"./static/extracted_files/temp_cv_{cv_id}.json"
+        try:
+            wrapper = {"CV_data": {"structured_data": serialize_datetime(doc)}}
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(wrapper, f, indent=2)
+            if embedder.embed_cv(temp_path):
+                stats["embedded_now"] += 1
+            else:
+                stats["failed"].append(cv_id)
+        except Exception:
+            stats["failed"].append(cv_id)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+    return stats
 
 @app.post("/upload-cv/")
 async def upload_cv(
@@ -639,11 +754,8 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         )
         logger.info(f"Dynamic collections: CV='{cv_collection_dyn}' JD='{jd_collection_dyn}'")
 
-        # ------------------------------
-        # 3. Ensure JD embedded (on-demand)
-        # ------------------------------
-        logger.info(f"[SEARCH] On-demand embedding start company='{company_name}' job='{job_title}'")
-        
+        # 3. Ensure JD embeddings (only embed if empty)
+        logger.info(f"[SEARCH] Ensuring JD embeddings for company='{company_name}' job='{job_title}'")
         temp_inserter_for_id = JDDataInserter()
         jd_id = temp_inserter_for_id.generate_jd_id(job_title, company_name)
         jd_inserter = JDDataInserter(
@@ -654,202 +766,23 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         jd_doc = jd_inserter.check_jd_exists(jd_id=jd_id)
         if not jd_doc:
             raise HTTPException(status_code=404, detail=f"No job description found for {job_title}. Please upload a JD first.")
-
-        os.makedirs(jd_persist_dir_dyn, exist_ok=True)
-        jd_embedder_dyn = JDEmbedder(
-            model=config["embedding"]["model"],
-            persist_directory=jd_persist_dir_dyn,
-            collection_name=jd_collection_dyn
-        )
+        jd_embedded_count = ensure_jd_embedded(jd_doc, jd_id, jd_collection_dyn, jd_persist_dir_dyn)
+        logger.info(f"[SEARCH] JD embedding count after ensure: {jd_embedded_count}")
         
-        # Check if JD is already embedded (check if collection exists and has documents)
-        try:
-            from langchain_chroma import Chroma
-            from langchain_ollama import OllamaEmbeddings
-            test_embeddings = OllamaEmbeddings(model=config["embedding"]["model"])
-            test_vectorstore = Chroma(
-                collection_name=jd_collection_dyn,
-                embedding_function=test_embeddings,
-                persist_directory=jd_persist_dir_dyn
-            )
-            jd_embedded_count = test_vectorstore._collection.count()
-            logger.info(f"[SEARCH] JD embedding check: {jd_embedded_count} documents in vector store")
-        except Exception as e:
-            logger.warning(f"[SEARCH] Could not check JD embeddings: {e}")
-            jd_embedded_count = 0
-        
-        if jd_embedded_count == 0:
-            logger.info(f"[SEARCH] Embedding JD for job_title='{job_title}'...")
-            # Recreate JD file from MongoDB document for embedding
-            jd_temp_path = f"./static/extracted_files/temp_jd_{jd_id}.json"
-            
-            # Helper function to serialize datetime objects
-            def serialize_datetime(obj):
-                """Recursively convert datetime objects to ISO format strings."""
-                if isinstance(obj, dict):
-                    return {k: serialize_datetime(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [serialize_datetime(item) for item in obj]
-                elif isinstance(obj, datetime):
-                    return obj.isoformat()
-                else:
-                    return obj
-            
-            # Serialize the JD document
-            jd_doc_serialized = serialize_datetime(jd_doc)
-            
-            with open(jd_temp_path, "w", encoding="utf-8") as f:
-                json.dump(jd_doc_serialized, f, indent=2)
-            
-            if not jd_embedder_dyn.embed_job_description_from_json(jd_temp_path):
-                os.remove(jd_temp_path) if os.path.exists(jd_temp_path) else None
-                raise HTTPException(status_code=500, detail="Failed to embed JD")
-            
-            os.remove(jd_temp_path) if os.path.exists(jd_temp_path) else None
-            logger.info(f"[SEARCH] JD embedded successfully")
-        else:
-            logger.info(f"[SEARCH] JD already embedded ({jd_embedded_count} docs)")
-        
-        # ------------------------------
-        # 4. Ensure CVs embedded (on-demand)
-        # ------------------------------
+        # 4. Ensure CV embeddings (embed only missing)
         cv_inserter = CVDataInserter(
             connection_string=config["mongodb"]["connection_string"],
             db_name=db_name_dyn,
             collection_name=cv_collection_mongo
         )
-        
-        # Connect to database to initialize collection
         if not cv_inserter.connect_to_database():
             raise HTTPException(status_code=500, detail="Failed to connect to CV database")
-        
         cv_docs = list(cv_inserter.collection.find({}))
         cv_inserter.close_connection()
-        
         if not cv_docs:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No CVs found for {job_title}. Please upload CVs first."
-            )
-        
-        logger.info(f"[SEARCH] Found {len(cv_docs)} CVs in MongoDB")
-        
-        # Check if CVs are embedded
-        os.makedirs(cv_persist_dir_dyn, exist_ok=True)
-        unique_cv_ids_embedded = set()
-        try:
-            test_cv_vectorstore = Chroma(
-                collection_name=cv_collection_dyn,
-                embedding_function=test_embeddings,
-                persist_directory=cv_persist_dir_dyn
-            )
-            cv_embedded_count = test_cv_vectorstore._collection.count()
-            
-            # Check unique CV IDs (this is what matters!)
-            try:
-                all_docs = test_cv_vectorstore.get()
-                if all_docs and 'metadatas' in all_docs:
-                    for meta in all_docs['metadatas']:
-                        if meta and 'cv_id' in meta:
-                            unique_cv_ids_embedded.add(meta['cv_id'])
-                logger.info(f"[SEARCH] CV embedding check: {cv_embedded_count} documents, {len(unique_cv_ids_embedded)} unique CVs in vector store")
-            except Exception as e:
-                logger.warning(f"[SEARCH] Could not count unique CVs: {e}")
-                
-        except Exception as e:
-            logger.warning(f"[SEARCH] Could not check CV embeddings: {e}")
-            cv_embedded_count = 0
-        
-        # Get CV IDs from MongoDB to compare
-        cv_ids_in_mongo = set(str(cv_doc['_id']) for cv_doc in cv_docs)
-        missing_cv_ids = cv_ids_in_mongo - unique_cv_ids_embedded
-        
-        # If any CVs are missing, clear everything and re-embed all
-        # This avoids ChromaDB persistence issues with partial embeddings
-        if missing_cv_ids or len(unique_cv_ids_embedded) != len(cv_docs):
-            if missing_cv_ids:
-                logger.info(f"[SEARCH] Missing {len(missing_cv_ids)} CVs from vector store")
-                logger.info(f"[SEARCH] Missing CV IDs: {list(missing_cv_ids)[:5]}...")  # Show first 5
-            
-            logger.warning(f"[SEARCH] Mismatch detected! ChromaDB has {len(unique_cv_ids_embedded)} CVs but MongoDB has {len(cv_docs)} CVs")
-            logger.info(f"[SEARCH] Clearing ChromaDB collection and re-embedding all {len(cv_docs)} CVs to ensure consistency...")
-            
-            try:
-                # Delete the entire collection to start fresh
-                test_cv_vectorstore._client.delete_collection(cv_collection_dyn)
-                logger.info(f"[SEARCH] ✓ Cleared collection '{cv_collection_dyn}'")
-            except Exception as e:
-                logger.warning(f"[SEARCH] Could not delete collection (may not exist): {e}")
-            
-            # Re-create embedder with fresh collection
-            cv_embedder_dyn = CVEmbedder(
-                model=config["embedding"]["model"],
-                persist_directory=cv_persist_dir_dyn,
-                collection_name=cv_collection_dyn
-            )
-            
-            # Helper function to serialize datetime objects
-            def serialize_datetime(obj):
-                """Recursively convert datetime objects to ISO format strings."""
-                if isinstance(obj, dict):
-                    return {k: serialize_datetime(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [serialize_datetime(item) for item in obj]
-                elif isinstance(obj, datetime):
-                    return obj.isoformat()
-                else:
-                    return obj
-            
-            # Embed each CV from MongoDB
-            embedded_count = 0
-            failed_cvs = []
-            
-            for idx, cv_doc in enumerate(cv_docs, 1):
-                cv_id = cv_doc.get('_id', f'unknown_{idx}')
-                try:
-                    logger.info(f"[SEARCH] Embedding CV {idx}/{len(cv_docs)}: {cv_id}")
-                    
-                    # Serialize the CV document to handle datetime objects
-                    cv_doc_serialized = serialize_datetime(cv_doc)
-                    
-                    # Create temp file from MongoDB document
-                    cv_temp_path = f"./static/extracted_files/temp_cv_{cv_id}.json"
-                    cv_wrapper = {"CV_data": {"structured_data": cv_doc_serialized}}
-                    
-                    with open(cv_temp_path, "w", encoding="utf-8") as f:
-                        json.dump(cv_wrapper, f, indent=2)
-                    
-                    embed_result = cv_embedder_dyn.embed_cv(cv_temp_path)
-                    
-                    if embed_result:
-                        embedded_count += 1
-                        logger.info(f"[SEARCH] ✓ Successfully embedded CV {cv_id}")
-                    else:
-                        failed_cvs.append(cv_id)
-                        logger.error(f"[SEARCH] ✗ Failed to embed CV {cv_id} - embed_cv returned False")
-                    
-                    # Clean up temp file
-                    if os.path.exists(cv_temp_path):
-                        os.remove(cv_temp_path)
-                        
-                except Exception as e:
-                    failed_cvs.append(cv_id)
-                    logger.error(f"[SEARCH] ✗ Exception embedding CV {cv_id}: {type(e).__name__}: {str(e)}")
-                    # Clean up temp file in case of error
-                    cv_temp_path = f"./static/extracted_files/temp_cv_{cv_id}.json"
-                    if os.path.exists(cv_temp_path):
-                        os.remove(cv_temp_path)
-                    continue
-            
-            logger.info(f"[SEARCH] Embedding complete: {embedded_count}/{len(cv_docs)} CVs successfully embedded")
-            
-            if failed_cvs:
-                logger.warning(f"[SEARCH] Failed CVs: {', '.join(str(cv) for cv in failed_cvs)}")
-            
-            if embedded_count == 0:
-                raise HTTPException(status_code=500, detail="Failed to embed any CVs")
-        else:
-            logger.info(f"[SEARCH] CVs already embedded ({cv_embedded_count} docs)")
+            raise HTTPException(status_code=404, detail=f"No CVs found for {job_title}. Please upload CVs first.")
+        cv_embed_stats = ensure_cv_embeddings(cv_docs, cv_collection_dyn, cv_persist_dir_dyn)
+        logger.info(f"[SEARCH] CV embedding stats: {cv_embed_stats}")
         
         # ------------------------------
         # 5. Vector search (full corpus first)
@@ -1101,6 +1034,7 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         depth_raw_values = []
         recency_raw_values = []
         impact_raw_values = []
+        # (Weights now handled inside scoring_utils; kept here only if future per-request logging needed.)
         for r in results:
             cid = r.get('cv_id')
             cv_doc = cv_doc_map.get(cid, {})
@@ -1149,6 +1083,23 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         # Skill coverage bonus weights
         MANDATORY_COVERAGE_BONUS_WEIGHT = 0.10
         OPTIONAL_COVERAGE_BONUS_WEIGHT = 0.05
+        # Optional semantic relevance cache (only if details requested to avoid extra embeddings cost)
+        semantic_cache = None
+        embed_fn = None
+        if show_details and bool(config.get('search', {}).get('semantic_skill_relevance', True)):
+            try:
+                # Load taxonomy raw yaml for alias expansion (yaml already imported globally)
+                tax_path = os.path.join(os.getcwd(), 'skills_taxonomy.yaml')
+                with open(tax_path, 'r', encoding='utf-8') as f:
+                    taxonomy_raw = yaml.safe_load(f) or {}
+                emb_model = config.get('embedding', {}).get('model', 'mxbai-embed-large')
+                ollama_emb = OllamaEmbeddings(model=emb_model)
+                embed_fn = lambda text: ollama_emb.embed_query(text)
+                semantic_cache = load_skill_semantic_cache(taxonomy_raw, embed_fn)
+            except Exception as e_sem:
+                logger.warning(f"Semantic skill cache init failed: {e_sem}")
+                semantic_cache = None
+                embed_fn = None
         for r in results:
             r['eligibility_gated_out'] = r['skill_mandatory_coverage'] < coverage_threshold
             d_norm = (r['skill_depth_score_raw'] - depth_p5) / depth_spread
@@ -1158,19 +1109,8 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             ir_norm = (r['impact_raw_score'] - impact_p5) / impact_spread
             r['impact_score'] = 0.0 if ir_norm < 0 else (1.0 if ir_norm > 1 else ir_norm)
             if not r['eligibility_gated_out']:
-                skill_bonus = (
-                    r['skill_mandatory_coverage'] * MANDATORY_COVERAGE_BONUS_WEIGHT +
-                    r['skill_optional_coverage'] * OPTIONAL_COVERAGE_BONUS_WEIGHT
-                )
-                r['combined_score'] = r.get('combined_score', r.get('total_score', 0.0)) + skill_bonus
-                sc = r.get('score_components') or {}
-                sc['skill_bonus'] = skill_bonus
-                sc['skill_mandatory_coverage'] = r['skill_mandatory_coverage']
-                sc['skill_optional_coverage'] = r['skill_optional_coverage']
-                # NOTE: Impact score intentionally excluded from combined_score until Phase 2 integration.
-                sc['impact_raw_score'] = r.get('impact_raw_score')
-                sc['impact_score_calibrated'] = r.get('impact_score')
-                r['score_components'] = sc
+                apply_skill_and_impact_adjustments(r, mandatory_skills, config, show_details=show_details,
+                                                   semantic_cache=semantic_cache, embed_fn=embed_fn)
         # Sort full set once
         results.sort(key=lambda x: x.get('combined_score', x.get('total_score', 0.0)), reverse=True)
         gated_ids = [r['cv_id'] for r in results if r.get('eligibility_gated_out')]
@@ -1321,6 +1261,18 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
                     entry['skill_depth_indicators'] = r_match.get('skill_depth_indicators')
                     entry['skill_depth_score_raw'] = r_match.get('skill_depth_score_raw')
                     entry['skill_recency_score_raw'] = r_match.get('skill_recency_score_raw')
+                    entry['combined_score_pre_impact'] = r_match.get('combined_score_pre_impact')
+
+        # Persist feature vectors (soft-fail)
+        try:
+            persist_features(
+                connection_string=config["mongodb"]["connection_string"],
+                company_name=company_name,
+                job_title=job_title,
+                candidate_records=results  # results contains enriched fields
+            )
+        except Exception as e_pf:
+            logger.warning(f"Feature persistence error (non-blocking): {e_pf}")
 
         return JSONResponse(content={
             "status": "success",
