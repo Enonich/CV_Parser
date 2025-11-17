@@ -26,6 +26,24 @@ from backend.embedders.cv_chroma_embedder import CVEmbedder
 from backend.embedders.jd_embedder import JDEmbedder
 from backend.core.fetch_top_k import CVJDVectorSearch
 from backend.core.reranker import CVJDReranker
+from backend.core.feature_extraction import (
+    SkillTaxonomy,
+    build_cv_skill_set,
+    build_jd_skill_groups,
+    compute_skill_coverage,
+    depth_indicators,
+    aggregate_depth_score,
+    placeholder_recency,
+    improved_recency,
+    dynamic_coverage_threshold,
+)
+from backend.core.feature_persistence import persist_features
+from backend.extractors.impact_extraction import extract_impact_features
+from backend.core.impact_relevance import compute_impact_relevance  # impact relevance to mandatory skills
+from backend.core.scoring_utils import apply_skill_and_impact_adjustments  # factored scoring adjustments
+from backend.core.semantic_skill_matcher import load_skill_semantic_cache  # semantic cache builder
+from langchain_ollama import OllamaEmbeddings
+from langchain_chroma import Chroma
 import logging
 
 # Configure logging
@@ -143,6 +161,115 @@ def _enforce_company_access(company_name: str, current_user: Dict[str, Any]):
         # Raw names stored; compare case-insensitive
         if company_name.lower().strip() not in {c.lower().strip() for c in allowed}:
             raise HTTPException(status_code=403, detail="Access to company denied")
+
+# ===================== Helper Utilities (Efficiency & Deduplication) =====================
+
+def serialize_datetime(obj: Any) -> Any:
+    """Recursively convert datetime objects to ISO strings (used for JD/CV temp serialization)."""
+    if isinstance(obj, dict):
+        return {k: serialize_datetime(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [serialize_datetime(v) for v in obj]
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    return obj
+
+def percentile_bounds(values: List[float]) -> tuple[float, float, float]:
+    if not values:
+        return 0.0, 1.0, 1.0
+    s = sorted(values)
+    p5 = s[int(0.05 * (len(s) - 1))]
+    p95 = s[int(0.95 * (len(s) - 1))]
+    spread = p95 - p5 if p95 != p5 else 1.0
+    return p5, p95, spread
+
+def percentile_calibrate(raw: float, p5: float, spread: float) -> float:
+    if spread <= 1e-12:
+        return 0.0
+    norm = (raw - p5) / spread
+    return 0.0 if norm < 0 else (1.0 if norm > 1 else norm)
+
+_embedding_model_name = config.get("embedding", {}).get("model", "mxbai-embed-large")
+_global_embeddings = OllamaEmbeddings(model=_embedding_model_name)
+
+def ensure_jd_embedded(jd_doc: Dict[str, Any], jd_id: str, jd_collection_name: str, jd_persist_dir: str) -> int:
+    """Ensure JD collection has embeddings; embed only if empty. Returns document count."""
+    os.makedirs(jd_persist_dir, exist_ok=True)
+    try:
+        vs = Chroma(collection_name=jd_collection_name, embedding_function=_global_embeddings, persist_directory=jd_persist_dir)
+        doc_count = vs._collection.count()
+    except Exception:
+        doc_count = 0
+    if doc_count > 0:
+        return doc_count
+    # Need to embed
+    temp_path = f"./static/extracted_files/temp_jd_{jd_id}.json"
+    try:
+        jd_serialized = serialize_datetime(jd_doc)
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(jd_serialized, f, indent=2)
+        jd_embedder_dyn = JDEmbedder(model=_embedding_model_name, persist_directory=jd_persist_dir, collection_name=jd_collection_name)
+        if not jd_embedder_dyn.embed_job_description_from_json(temp_path):
+            raise RuntimeError("JD embedding failed")
+        return Chroma(collection_name=jd_collection_name, embedding_function=_global_embeddings, persist_directory=jd_persist_dir)._collection.count()
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+def ensure_cv_embeddings(cv_docs: List[Dict[str, Any]], cv_collection_name: str, cv_persist_dir: str) -> Dict[str, Any]:
+    """Embed only missing CVs (identified by cv_id). Returns stats dict."""
+    os.makedirs(cv_persist_dir, exist_ok=True)
+    stats = {"existing_docs": 0, "existing_unique_cv_ids": 0, "embedded_now": 0, "failed": []}
+    try:
+        vs = Chroma(collection_name=cv_collection_name, embedding_function=_global_embeddings, persist_directory=cv_persist_dir)
+        stats["existing_docs"] = vs._collection.count()
+        try:
+            raw = vs.get()
+            unique_ids = set()
+            for m in raw.get('metadatas', []) or []:
+                cid = m.get('cv_id') if isinstance(m, dict) else None
+                if cid:
+                    unique_ids.add(cid)
+            stats["existing_unique_cv_ids"] = len(unique_ids)
+        except Exception:
+            stats["existing_unique_cv_ids"] = 0
+    except Exception:
+        stats["existing_docs"] = 0
+        stats["existing_unique_cv_ids"] = 0
+    # Determine missing IDs
+    mongo_ids = [str(doc.get('_id')) for doc in cv_docs]
+    embedded_ids = set()
+    if stats["existing_unique_cv_ids"] > 0:
+        try:
+            vs2 = Chroma(collection_name=cv_collection_name, embedding_function=_global_embeddings, persist_directory=cv_persist_dir)
+            raw2 = vs2.get()
+            for m in raw2.get('metadatas', []) or []:
+                cid = m.get('cv_id') if isinstance(m, dict) else None
+                if cid:
+                    embedded_ids.add(cid)
+        except Exception:
+            embedded_ids = set()
+    missing = [doc for doc in cv_docs if str(doc.get('_id')) not in embedded_ids]
+    if not missing:
+        return stats
+    embedder = CVEmbedder(model=_embedding_model_name, persist_directory=cv_persist_dir, collection_name=cv_collection_name)
+    for idx, doc in enumerate(missing, 1):
+        cv_id = str(doc.get('_id'))
+        temp_path = f"./static/extracted_files/temp_cv_{cv_id}.json"
+        try:
+            wrapper = {"CV_data": {"structured_data": serialize_datetime(doc)}}
+            with open(temp_path, "w", encoding="utf-8") as f:
+                json.dump(wrapper, f, indent=2)
+            if embedder.embed_cv(temp_path):
+                stats["embedded_now"] += 1
+            else:
+                stats["failed"].append(cv_id)
+        except Exception:
+            stats["failed"].append(cv_id)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+    return stats
 
 @app.post("/upload-cv/")
 async def upload_cv(
@@ -284,8 +411,33 @@ async def upload_cv(
                 # Embeddings will be generated on-demand during search
                 logger.info(f"[CV UPLOAD] Successfully stored CV in MongoDB without embedding. Will embed during search.")
 
+        # Ensure MongoDB connection is closed after all operations
+        try:
+            cv_inserter_dyn.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing CV inserter connection: {e}")
+
         # Clean up temporary CV file
         os.remove(cv_path)
+
+        # Check if there was an insertion error and return appropriate status
+        insertion_error_flag = insertion_error if 'insertion_error' in locals() else False
+        insertion_error_code_val = insertion_error_code if 'insertion_error_code' in locals() else None
+        insertion_error_detail_val = insertion_error_detail if 'insertion_error_detail' in locals() else None
+        
+        if insertion_error_flag:
+            # Return 500 error if insertion failed
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "status": "error",
+                    "message": insertion_error_detail_val or "Failed to save CV to database",
+                    "error_code": insertion_error_code_val,
+                    "cv_json_path": json_path,
+                    "company_name": company_name,
+                    "job_title": job_title
+                }
+            )
 
         return JSONResponse(content={
             "status": "success",
@@ -293,9 +445,7 @@ async def upload_cv(
             "existing": duplicate_within_job,
             "duplicate_within_job": duplicate_within_job,
             "existing_other_job_same_company": existing_other_job_same_company,
-            "insertion_error": insertion_error if 'insertion_error' in locals() else False,
-            "insertion_error_code": insertion_error_code if 'insertion_error_code' in locals() else None,
-            "insertion_error_detail": insertion_error_detail if 'insertion_error_detail' in locals() else None,
+            "insertion_error": False,
             "company_name": company_name,
             "job_title": job_title
         })
@@ -399,6 +549,11 @@ async def upload_jd(
 
         if existing_jd:
             logger.info(f"JD already exists for company='{company_name}' job_title='{job_title}' (_id={jd_id})")
+            # Ensure MongoDB connection is closed
+            try:
+                jd_inserter_dyn.close_connection()
+            except Exception as e:
+                logger.warning(f"Error closing JD inserter connection: {e}")
             os.remove(jd_path)
             return JSONResponse(content={
                 "status": "success",
@@ -410,15 +565,42 @@ async def upload_jd(
         else:
             jd_insert_success = jd_inserter_dyn.process_jd_file(json_path)
             if not jd_insert_success:
-                logger.warning("JD insertion failed - likely due to duplicate race")
+                # Re-check to distinguish duplicate from actual failure
+                recheck_jd = jd_inserter_dyn.check_jd_exists(jd_id=jd_id)
+                
+                # Ensure MongoDB connection is closed
+                try:
+                    jd_inserter_dyn.close_connection()
+                except Exception as e:
+                    logger.warning(f"Error closing JD inserter connection: {e}")
+                
                 os.remove(jd_path)
-                return JSONResponse(content={
-                    "status": "success",
-                    "jd_json_path": json_path,
-                    "jd_id": jd_id,
-                    "message": "Job Description already exists in database",
-                    "existing": True
-                })
+                
+                if recheck_jd:
+                    # It was actually a duplicate race condition
+                    logger.warning("JD insertion failed - confirmed duplicate race condition")
+                    return JSONResponse(content={
+                        "status": "success",
+                        "jd_json_path": json_path,
+                        "jd_id": jd_id,
+                        "message": "Job Description already exists in database",
+                        "existing": True
+                    })
+                else:
+                    # Actual insertion failure
+                    logger.error(f"[JD INSERTION ERROR] Failed to insert JD for job='{job_title}' company='{company_name}'")
+                    return JSONResponse(
+                        status_code=500,
+                        content={
+                            "status": "error",
+                            "message": "Failed to save Job Description to database",
+                            "error_code": "jd_insert_failed",
+                            "jd_json_path": json_path,
+                            "company_name": company_name,
+                            "job_title": job_title
+                        }
+                    )
+            
             jd_embedder_dyn = JDEmbedder(
                 model=config["embedding"]["model"],
                 persist_directory=jd_persist_dir_dyn,
@@ -426,6 +608,12 @@ async def upload_jd(
             )
             # DO NOT embed automatically - will embed during search
             logger.info(f"[JD UPLOAD] Successfully stored JD in MongoDB without embedding. Will embed during search.")
+
+        # Ensure MongoDB connection is closed after all operations
+        try:
+            jd_inserter_dyn.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing JD inserter connection: {e}")
 
         # Clean up temporary JD file
         os.remove(jd_path)
@@ -476,6 +664,12 @@ async def check_data_status(
         )
         jd_exists = jd_inserter.check_jd_exists(jd_id=jd_id) is not None
         
+        # Ensure connection is closed
+        try:
+            jd_inserter.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing JD inserter connection in data-status: {e}")
+        
         return JSONResponse(content={
             "cv_count": cv_count,
             "jd_exists": jd_exists,
@@ -496,9 +690,13 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
     or malformed on the frontend. Provides clearer validation errors.
     """
     try:
+        # ------------------------------
+        # 1. Parse & validate request
+        # ------------------------------
         raw_body = await request.body()
         body_text = raw_body.decode("utf-8") if raw_body else "{}"
-        logger.info(f"/search-cvs/ raw body length={len(body_text)} text={body_text}")
+        preview = body_text[:500] + ("..." if len(body_text) > 500 else "")
+        logger.info(f"/search-cvs/ raw body length={len(body_text)} preview={preview}")
         diag_headers = {k: v for k, v in request.headers.items() if k.lower() in ["content-type", "user-agent", "accept", "x-company-name", "x-job-title"]}
         logger.info(f"/search-cvs/ headers: {diag_headers}")
         try:
@@ -513,7 +711,6 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
         show_details = bool(payload.get("show_details", False))
         logger.info(f"/search-cvs/ parsed keys: {list(payload.keys())}; company_name='{company_name}' job_title='{job_title}' jd_id='{jd_id_raw}' top_k_cvs={top_k_cvs}")
 
-        # Fallback sources if missing
         if not company_name or not job_title:
             qp_company = (request.query_params.get("company_name") or "").strip()
             qp_job = (request.query_params.get("job_title") or "").strip()
@@ -522,264 +719,75 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             with _context_lock:
                 cached_company = _last_context.get("company_name", "").strip()
                 cached_job = _last_context.get("job_title", "").strip()
-            if not company_name and qp_company:
-                company_name = qp_company
-            if not job_title and qp_job:
-                job_title = qp_job
-            if not company_name and header_company:
-                company_name = header_company
-            if not job_title and header_job:
-                job_title = header_job
-            if not company_name and cached_company:
-                company_name = cached_company
-            if not job_title and cached_job:
-                job_title = cached_job
-            logger.info(f"/search-cvs/ after fallbacks: company_name='{company_name}' job_title='{job_title}' (cached_company='{cached_company}' cached_job='{cached_job}')")
+            company_name = company_name or qp_company or header_company or cached_company
+            job_title = job_title or qp_job or header_job or cached_job
+            logger.info(f"/search-cvs/ after fallbacks: company_name='{company_name}' job_title='{job_title}'")
 
         errors: List[str] = []
         if not company_name:
             errors.append("company_name is required")
         if not job_title:
             errors.append("job_title is required")
-        if top_k_cvs is None or not isinstance(top_k_cvs, int) or top_k_cvs <= 0:
-            cfg_default = int(config["search"].get("top_k_cvs", 5))
-            logger.info(f"Using fallback top_k_cvs={cfg_default} (provided={top_k_cvs})")
-            top_k_cvs = cfg_default
         if errors:
             raise HTTPException(status_code=400, detail=errors)
 
+        logger.info(f"Received top_k_cvs: value={top_k_cvs}, type={type(top_k_cvs)}")
+        if top_k_cvs is None or not isinstance(top_k_cvs, int) or top_k_cvs <= 0:
+            top_k_cvs = int(config["search"].get("top_k_cvs", 5))
+            logger.info(f"Using fallback top_k_cvs={top_k_cvs}")
+        max_allowed = int(config["search"].get("max_top_k_cvs", 100))
+        if top_k_cvs > max_allowed:
+            logger.info(f"Clamping top_k_cvs from {top_k_cvs} to {max_allowed}")
+            top_k_cvs = max_allowed
+
         _enforce_company_access(company_name, current_user)
-        
-        # Get MongoDB collections info
+
+        # ------------------------------
+        # 2. Resolve dynamic collection/dir names
+        # ------------------------------
         db_name_dyn, cv_collection_mongo, jd_collection_mongo = build_mongo_names(company_name, job_title)
-        
         cv_collection_dyn, jd_collection_dyn = build_collection_names(company_name, job_title)
         cv_persist_dir_dyn, jd_persist_dir_dyn = build_persist_directories(
             config["chroma"]["cv_persist_dir"],
             config["chroma"]["jd_persist_dir"],
             company_name
         )
-        logger.info(f"Dynamic collections resolved: CV='{cv_collection_dyn}' JD='{jd_collection_dyn}' persist_cv='{cv_persist_dir_dyn}' persist_jd='{jd_persist_dir_dyn}'")
+        logger.info(f"Dynamic collections: CV='{cv_collection_dyn}' JD='{jd_collection_dyn}'")
 
-        # ========== EMBEDDING ON DEMAND ==========
-        # Before searching, ensure all CVs and the JD are embedded
-        logger.info(f"[SEARCH] Starting on-demand embedding for company='{company_name}' job='{job_title}'")
-        
-        # Check if JD exists and embed it
+        # 3. Ensure JD embeddings (only embed if empty)
+        logger.info(f"[SEARCH] Ensuring JD embeddings for company='{company_name}' job='{job_title}'")
         temp_inserter_for_id = JDDataInserter()
         jd_id = temp_inserter_for_id.generate_jd_id(job_title, company_name)
-        
         jd_inserter = JDDataInserter(
             connection_string=config["mongodb"]["connection_string"],
             db_name=db_name_dyn,
             collection_name=jd_collection_mongo
         )
         jd_doc = jd_inserter.check_jd_exists(jd_id=jd_id)
-        
         if not jd_doc:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"No job description found for {job_title}. Please upload a JD first."
-            )
+            raise HTTPException(status_code=404, detail=f"No job description found for {job_title}. Please upload a JD first.")
+        jd_embedded_count = ensure_jd_embedded(jd_doc, jd_id, jd_collection_dyn, jd_persist_dir_dyn)
+        logger.info(f"[SEARCH] JD embedding count after ensure: {jd_embedded_count}")
         
-        # Embed JD if not already embedded
-        os.makedirs(jd_persist_dir_dyn, exist_ok=True)
-        jd_embedder_dyn = JDEmbedder(
-            model=config["embedding"]["model"],
-            persist_directory=jd_persist_dir_dyn,
-            collection_name=jd_collection_dyn
-        )
-        
-        # Check if JD is already embedded (check if collection exists and has documents)
-        try:
-            from langchain_chroma import Chroma
-            from langchain_ollama import OllamaEmbeddings
-            test_embeddings = OllamaEmbeddings(model=config["embedding"]["model"])
-            test_vectorstore = Chroma(
-                collection_name=jd_collection_dyn,
-                embedding_function=test_embeddings,
-                persist_directory=jd_persist_dir_dyn
-            )
-            jd_embedded_count = test_vectorstore._collection.count()
-            logger.info(f"[SEARCH] JD embedding check: {jd_embedded_count} documents in vector store")
-        except Exception as e:
-            logger.warning(f"[SEARCH] Could not check JD embeddings: {e}")
-            jd_embedded_count = 0
-        
-        if jd_embedded_count == 0:
-            logger.info(f"[SEARCH] Embedding JD for job_title='{job_title}'...")
-            # Recreate JD file from MongoDB document for embedding
-            jd_temp_path = f"./static/extracted_files/temp_jd_{jd_id}.json"
-            
-            # Helper function to serialize datetime objects
-            def serialize_datetime(obj):
-                """Recursively convert datetime objects to ISO format strings."""
-                if isinstance(obj, dict):
-                    return {k: serialize_datetime(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [serialize_datetime(item) for item in obj]
-                elif isinstance(obj, datetime):
-                    return obj.isoformat()
-                else:
-                    return obj
-            
-            # Serialize the JD document
-            jd_doc_serialized = serialize_datetime(jd_doc)
-            
-            with open(jd_temp_path, "w", encoding="utf-8") as f:
-                json.dump(jd_doc_serialized, f, indent=2)
-            
-            if not jd_embedder_dyn.embed_job_description_from_json(jd_temp_path):
-                os.remove(jd_temp_path) if os.path.exists(jd_temp_path) else None
-                raise HTTPException(status_code=500, detail="Failed to embed JD")
-            
-            os.remove(jd_temp_path) if os.path.exists(jd_temp_path) else None
-            logger.info(f"[SEARCH] JD embedded successfully")
-        else:
-            logger.info(f"[SEARCH] JD already embedded ({jd_embedded_count} docs)")
-        
-        # Check if CVs exist and embed them
+        # 4. Ensure CV embeddings (embed only missing)
         cv_inserter = CVDataInserter(
             connection_string=config["mongodb"]["connection_string"],
             db_name=db_name_dyn,
             collection_name=cv_collection_mongo
         )
-        
-        # Connect to database to initialize collection
         if not cv_inserter.connect_to_database():
             raise HTTPException(status_code=500, detail="Failed to connect to CV database")
-        
         cv_docs = list(cv_inserter.collection.find({}))
         cv_inserter.close_connection()
-        
         if not cv_docs:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No CVs found for {job_title}. Please upload CVs first."
-            )
+            raise HTTPException(status_code=404, detail=f"No CVs found for {job_title}. Please upload CVs first.")
+        cv_embed_stats = ensure_cv_embeddings(cv_docs, cv_collection_dyn, cv_persist_dir_dyn)
+        logger.info(f"[SEARCH] CV embedding stats: {cv_embed_stats}")
         
-        logger.info(f"[SEARCH] Found {len(cv_docs)} CVs in MongoDB")
-        
-        # Check if CVs are embedded
-        os.makedirs(cv_persist_dir_dyn, exist_ok=True)
-        unique_cv_ids_embedded = set()
-        try:
-            test_cv_vectorstore = Chroma(
-                collection_name=cv_collection_dyn,
-                embedding_function=test_embeddings,
-                persist_directory=cv_persist_dir_dyn
-            )
-            cv_embedded_count = test_cv_vectorstore._collection.count()
-            
-            # Check unique CV IDs (this is what matters!)
-            try:
-                all_docs = test_cv_vectorstore.get()
-                if all_docs and 'metadatas' in all_docs:
-                    for meta in all_docs['metadatas']:
-                        if meta and 'cv_id' in meta:
-                            unique_cv_ids_embedded.add(meta['cv_id'])
-                logger.info(f"[SEARCH] CV embedding check: {cv_embedded_count} documents, {len(unique_cv_ids_embedded)} unique CVs in vector store")
-            except Exception as e:
-                logger.warning(f"[SEARCH] Could not count unique CVs: {e}")
-                
-        except Exception as e:
-            logger.warning(f"[SEARCH] Could not check CV embeddings: {e}")
-            cv_embedded_count = 0
-        
-        # Get CV IDs from MongoDB to compare
-        cv_ids_in_mongo = set(str(cv_doc['_id']) for cv_doc in cv_docs)
-        missing_cv_ids = cv_ids_in_mongo - unique_cv_ids_embedded
-        
-        # If any CVs are missing, clear everything and re-embed all
-        # This avoids ChromaDB persistence issues with partial embeddings
-        if missing_cv_ids or len(unique_cv_ids_embedded) != len(cv_docs):
-            if missing_cv_ids:
-                logger.info(f"[SEARCH] Missing {len(missing_cv_ids)} CVs from vector store")
-                logger.info(f"[SEARCH] Missing CV IDs: {list(missing_cv_ids)[:5]}...")  # Show first 5
-            
-            logger.warning(f"[SEARCH] Mismatch detected! ChromaDB has {len(unique_cv_ids_embedded)} CVs but MongoDB has {len(cv_docs)} CVs")
-            logger.info(f"[SEARCH] Clearing ChromaDB collection and re-embedding all {len(cv_docs)} CVs to ensure consistency...")
-            
-            try:
-                # Delete the entire collection to start fresh
-                test_cv_vectorstore._client.delete_collection(cv_collection_dyn)
-                logger.info(f"[SEARCH] ✓ Cleared collection '{cv_collection_dyn}'")
-            except Exception as e:
-                logger.warning(f"[SEARCH] Could not delete collection (may not exist): {e}")
-            
-            # Re-create embedder with fresh collection
-            cv_embedder_dyn = CVEmbedder(
-                model=config["embedding"]["model"],
-                persist_directory=cv_persist_dir_dyn,
-                collection_name=cv_collection_dyn
-            )
-            
-            # Helper function to serialize datetime objects
-            def serialize_datetime(obj):
-                """Recursively convert datetime objects to ISO format strings."""
-                if isinstance(obj, dict):
-                    return {k: serialize_datetime(v) for k, v in obj.items()}
-                elif isinstance(obj, list):
-                    return [serialize_datetime(item) for item in obj]
-                elif isinstance(obj, datetime):
-                    return obj.isoformat()
-                else:
-                    return obj
-            
-            # Embed each CV from MongoDB
-            embedded_count = 0
-            failed_cvs = []
-            
-            for idx, cv_doc in enumerate(cv_docs, 1):
-                cv_id = cv_doc.get('_id', f'unknown_{idx}')
-                try:
-                    logger.info(f"[SEARCH] Embedding CV {idx}/{len(cv_docs)}: {cv_id}")
-                    
-                    # Serialize the CV document to handle datetime objects
-                    cv_doc_serialized = serialize_datetime(cv_doc)
-                    
-                    # Create temp file from MongoDB document
-                    cv_temp_path = f"./static/extracted_files/temp_cv_{cv_id}.json"
-                    cv_wrapper = {"CV_data": {"structured_data": cv_doc_serialized}}
-                    
-                    with open(cv_temp_path, "w", encoding="utf-8") as f:
-                        json.dump(cv_wrapper, f, indent=2)
-                    
-                    embed_result = cv_embedder_dyn.embed_cv(cv_temp_path)
-                    
-                    if embed_result:
-                        embedded_count += 1
-                        logger.info(f"[SEARCH] ✓ Successfully embedded CV {cv_id}")
-                    else:
-                        failed_cvs.append(cv_id)
-                        logger.error(f"[SEARCH] ✗ Failed to embed CV {cv_id} - embed_cv returned False")
-                    
-                    # Clean up temp file
-                    if os.path.exists(cv_temp_path):
-                        os.remove(cv_temp_path)
-                        
-                except Exception as e:
-                    failed_cvs.append(cv_id)
-                    logger.error(f"[SEARCH] ✗ Exception embedding CV {cv_id}: {type(e).__name__}: {str(e)}")
-                    # Clean up temp file in case of error
-                    cv_temp_path = f"./static/extracted_files/temp_cv_{cv_id}.json"
-                    if os.path.exists(cv_temp_path):
-                        os.remove(cv_temp_path)
-                    continue
-            
-            logger.info(f"[SEARCH] Embedding complete: {embedded_count}/{len(cv_docs)} CVs successfully embedded")
-            
-            if failed_cvs:
-                logger.warning(f"[SEARCH] Failed CVs: {', '.join(str(cv) for cv in failed_cvs)}")
-            
-            if embedded_count == 0:
-                raise HTTPException(status_code=500, detail="Failed to embed any CVs")
-        else:
-            logger.info(f"[SEARCH] CVs already embedded ({cv_embedded_count} docs)")
-        
-        # ========== NOW PROCEED WITH SEARCH ==========
-        logger.info(f"[SEARCH] Starting vector search with embedded data")
-
+        # ------------------------------
+        # 5. Vector search (full corpus first)
+        # ------------------------------
+        logger.info("[SEARCH] Starting vector search")
         searcher = CVJDVectorSearch(
             cv_persist_dir=cv_persist_dir_dyn,
             jd_persist_dir=jd_persist_dir_dyn,
@@ -788,9 +796,10 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             model=config["embedding"]["model"],
             top_k_per_section=config["search"]["top_k_per_section"]
         )
-        results = searcher.search_and_score_cvs(top_k_cvs=top_k_cvs)
-        if not results:
+        results_full = searcher.search_and_score_cvs(top_k_cvs=None)
+        if not results_full:
             raise HTTPException(status_code=404, detail="No CVs found or no JD available for this context")
+        results = list(results_full)
 
         jd_id_used: Optional[str] = None
         reranker_meta: Dict[str, Any] = {}
@@ -846,83 +855,332 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
             rerank_mode = "disabled"
 
         # ========================================
-        # HYBRID 3-WEIGHT SCORING SYSTEM
-        # Combines: vector_score + bm25_score + cross_encoder_score
+        # HYBRID SCORING (Improved):
+        # Components: vector_score + bm25_norm (if provided) + ce_global_norm + ce_section_weighted
         # ========================================
-        
-        # Normalize cross-encoder scores to [0, 1]
-        ce_scores = [r.get("cross_encoder_score") for r in results if isinstance(r.get("cross_encoder_score"), (int, float))]
-        if ce_scores:
-            ce_min, ce_max = min(ce_scores), max(ce_scores)
-            ce_span = ce_max - ce_min if ce_max != ce_min else 1.0
-        
-        # Normalize BM25 scores to [0, 1] (should already be normalized, but ensure)
-        bm25_scores_list = [r.get("bm25_score") for r in results if isinstance(r.get("bm25_score"), (int, float))]
-        if bm25_scores_list:
-            bm25_min, bm25_max = min(bm25_scores_list), max(bm25_scores_list)
-            bm25_span = bm25_max - bm25_min if bm25_max != bm25_min else 1.0
-        
-        # Compute hybrid combined score for each result
+        # 1. Determine if BM25 already normalized by reranker (avoid double normalization)
+        reranker_bm25_meta = reranker_meta.get("bm25_normalization") if isinstance(reranker_meta, dict) else None
+        bm25_already_normalized = bool(reranker_bm25_meta and reranker_bm25_meta.get("method") == "saturation")
+        bm25_scores_list = [r.get("bm25_score") for r in results_full if isinstance(r.get("bm25_score"), (int, float))]
+        bm25_active = enable_bm25 and bool(bm25_scores_list)
+        if not bm25_already_normalized and bm25_active:
+            # Compute saturation once if raw scores (fallback scenario when reranker absent)
+            try:
+                import statistics
+                bm25_median = statistics.median(bm25_scores_list)
+            except Exception:
+                bm25_median = sum(bm25_scores_list) / max(len(bm25_scores_list), 1)
+            bm25_k = max(bm25_median, 1.0)
+        else:
+            bm25_k = reranker_bm25_meta.get("k") if bm25_already_normalized else 1.0
+
+        # 2. Calibrate cross-encoder global scores using percentile scaling (p5-p95)
+        ce_raw_scores_full = [r.get("cross_encoder_score") for r in results_full if isinstance(r.get("cross_encoder_score"), (int, float))]
+        if ce_raw_scores_full:
+            sorted_ce = sorted(ce_raw_scores_full)
+            p5_idx = max(int(0.05 * (len(sorted_ce)-1)), 0)
+            p95_idx = int(0.95 * (len(sorted_ce)-1))
+            ce_p5 = sorted_ce[p5_idx]
+            ce_p95 = sorted_ce[p95_idx]
+            ce_spread = ce_p95 - ce_p5
+        else:
+            ce_p5 = 0.0; ce_p95 = 1.0; ce_spread = 1.0
+
+        # Fixed fallback range for CE if spread too narrow
+        CE_SCORE_MIN_FIX = -10.0
+        CE_SCORE_MAX_FIX = 10.0
+        use_percentile_ce = ce_spread > 1e-6  # ensure non-trivial spread
+
+        # 3. Section-level CE weighted fusion
+        # Define JD section weights (align with vector search mapping philosophy)
+        jd_section_weights = {
+            "required_skills": 0.22,
+            "preferred_skills": 0.05,
+            "required_qualifications": 0.10,
+            "education_requirements": 0.05,
+            "experience_requirements": 0.10,
+            "technical_skills": 0.10,
+            "soft_skills": 0.08,
+            "certifications": 0.05,
+            "responsibilities": 0.15,
+            "job_title": 0.05,
+            "description": 0.05
+        }
+        # Normalize weights
+        total_w = sum(jd_section_weights.values())
+        if total_w > 0:
+            for k in jd_section_weights:
+                jd_section_weights[k] = jd_section_weights[k] / total_w
+
+        critical_sections = ["required_skills", "required_qualifications"]
+        penalty_per_missing = 0.05  # subtract this proportion of max score per missing critical section
+
+        # 4. Compute calibrated & fused scores per candidate
         for r in results:
-            # Vector score (already normalized 0-1 from vector search)
             vector_score = r.get("total_score", 0.0)
-            
-            # BM25 score (normalized 0-1)
-            bm25_raw = r.get("bm25_score")
-            if isinstance(bm25_raw, (int, float)) and bm25_scores_list:
-                bm25_norm = (bm25_raw - bm25_min) / bm25_span
+            bm25_val = r.get("bm25_score") if bm25_active else None
+            if bm25_active:
+                if bm25_already_normalized:
+                    bm25_norm = bm25_val if isinstance(bm25_val, (int,float)) else 0.0
+                else:
+                    bm25_norm = (bm25_val / (bm25_val + bm25_k)) if isinstance(bm25_val, (int,float)) and bm25_val > 0 else 0.0
             else:
                 bm25_norm = 0.0
-            
-            # Cross-encoder score (normalized 0-1)
+
             ce_raw = r.get("cross_encoder_score")
-            if isinstance(ce_raw, (int, float)) and ce_scores:
-                ce_norm = (ce_raw - ce_min) / ce_span
+            if isinstance(ce_raw, (int,float)):
+                if use_percentile_ce:
+                    ce_norm = (ce_raw - ce_p5) / ce_spread if ce_spread > 0 else 0.0
+                    ce_norm = 0.0 if ce_norm < 0 else (1.0 if ce_norm > 1 else ce_norm)
+                else:
+                    # Fallback fixed-range clamp
+                    ce_clamped = max(CE_SCORE_MIN_FIX, min(CE_SCORE_MAX_FIX, ce_raw))
+                    ce_norm = (ce_clamped - CE_SCORE_MIN_FIX) / (CE_SCORE_MAX_FIX - CE_SCORE_MIN_FIX)
             else:
                 ce_norm = 0.0
-            
-            # Hybrid score with configurable weights
-            # If BM25 disabled, redistribute its weight to vector and CE
-            if enable_bm25 and bm25_norm > 0:
-                r["combined_score"] = (
-                    vector_weight * vector_score + 
-                    bm25_weight * bm25_norm + 
-                    cross_encoder_weight * ce_norm
+
+            # Section-level CE aggregation
+            ce_section_scores = r.get("cross_encoder_section_scores") or {}
+            weighted_section_sum = 0.0
+            section_contributions = []
+            for sec, w in jd_section_weights.items():
+                sec_score = ce_section_scores.get(sec)
+                if isinstance(sec_score, (int,float)):
+                    # Calibrate same way as global (percentile) if possible using ce_p5 / ce_p95, treat raw similarly
+                    if use_percentile_ce:
+                        sec_norm = (sec_score - ce_p5) / ce_spread if ce_spread > 0 else 0.0
+                        sec_norm = 0.0 if sec_norm < 0 else (1.0 if sec_norm > 1 else sec_norm)
+                    else:
+                        sec_clamped = max(CE_SCORE_MIN_FIX, min(CE_SCORE_MAX_FIX, sec_score))
+                        sec_norm = (sec_clamped - CE_SCORE_MIN_FIX) / (CE_SCORE_MAX_FIX - CE_SCORE_MIN_FIX)
+                else:
+                    sec_norm = 0.0
+                contrib = w * sec_norm
+                weighted_section_sum += contrib
+                section_contributions.append((sec, sec_norm, contrib))
+
+            # Missing critical sections penalty
+            missing_critical = [sec for sec in critical_sections if not isinstance(ce_section_scores.get(sec), (int,float)) or ce_section_scores.get(sec) == 0]
+            penalty = penalty_per_missing * len(missing_critical)
+
+            # Combine components; allocate weights: keep existing high-level weights but add section CE
+            # Rebalance: treat ce_norm and weighted_section_sum as two CE facets splitting cross_encoder_weight
+            if cross_encoder_weight > 0:
+                ce_global_part = cross_encoder_weight * 0.5
+                ce_section_part = cross_encoder_weight * 0.5
+            else:
+                ce_global_part = ce_section_part = 0.0
+
+            if bm25_active:
+                base_combined = (
+                    vector_weight * vector_score +
+                    bm25_weight * bm25_norm +
+                    ce_global_part * ce_norm +
+                    ce_section_part * weighted_section_sum
                 )
             else:
-                # BM25 disabled or no scores: use 2-component blend
-                total_w = vector_weight + cross_encoder_weight
-                if total_w > 0:
-                    r["combined_score"] = (
-                        (vector_weight / total_w) * vector_score + 
-                        (cross_encoder_weight / total_w) * ce_norm
-                    )
+                # redistribute vector + CE parts proportionally if bm25 absent
+                avail = vector_weight + cross_encoder_weight
+                if avail > 0:
+                    vector_part = vector_weight / avail
+                    ce_total_part = cross_encoder_weight / avail
                 else:
-                    r["combined_score"] = vector_score
-            
-            # Store individual normalized scores for debugging
+                    vector_part = ce_total_part = 0.5
+                base_combined = (
+                    vector_part * vector_score +
+                    ce_total_part * (0.5 * ce_norm + 0.5 * weighted_section_sum)
+                )
+
+            adjusted_combined = max(base_combined - penalty, 0.0)
+
+            # Persist detailed components for interpretability
+            section_contributions_sorted = sorted(section_contributions, key=lambda x: x[2], reverse=True)
+            r["combined_score"] = adjusted_combined
             r["vector_score_normalized"] = vector_score
             r["bm25_score_normalized"] = bm25_norm
-            r["ce_score_normalized"] = ce_norm
-        
-        # Sort by combined score
-        results.sort(key=lambda x: x.get("combined_score", x.get("total_score", 0.0)), reverse=True)
+            r["ce_score_global_normalized"] = ce_norm
+            r["ce_section_weighted_score"] = weighted_section_sum
+            r["missing_critical_sections"] = missing_critical
+            r["penalty"] = penalty
+            r["score_components"] = {
+                "vector": vector_score,
+                "bm25_norm": bm25_norm,
+                "ce_global_norm": ce_norm,
+                "ce_section_weighted": weighted_section_sum,
+                "penalty": penalty,
+                "weights": {
+                    "vector_weight": vector_weight,
+                    "bm25_weight": bm25_weight if bm25_active else 0.0,
+                    "ce_global_part": ce_global_part if bm25_active else 0.5 * cross_encoder_weight,
+                    "ce_section_part": ce_section_part if bm25_active else 0.5 * cross_encoder_weight
+                }
+            }
+            r["top_section_contributions"] = [
+                {"section": sec, "normalized": norm, "weighted_contribution": contrib}
+                for sec, norm, contrib in section_contributions_sorted[:5]
+            ]
+            r["raw_scores"] = {
+                "vector": vector_score,
+                "bm25": bm25_val if isinstance(bm25_val, (int,float)) else None,
+                "cross_encoder": ce_raw if isinstance(ce_raw, (int,float)) else None
+            }
 
+        # 5. Eligibility & skill feature extraction (dynamic threshold & calibration + mandatory/optional split)
+        taxonomy = SkillTaxonomy.load()
+        mandatory_skills, optional_skills = build_jd_skill_groups(jd_doc, taxonomy)
+        jd_required_skills = mandatory_skills  # for depth/recency reference
+        cv_doc_map = {str(cvd.get('_id')): cvd for cvd in cv_docs}
+        coverage_values = []
+        depth_raw_values = []
+        recency_raw_values = []
+        impact_raw_values = []
+        # (Weights now handled inside scoring_utils; kept here only if future per-request logging needed.)
+        for r in results:
+            cid = r.get('cv_id')
+            cv_doc = cv_doc_map.get(cid, {})
+            cv_skill_set = build_cv_skill_set(cv_doc, taxonomy)
+            mandatory_cov, mandatory_missing, mandatory_detail = compute_skill_coverage(mandatory_skills, cv_skill_set, taxonomy)
+            optional_cov, optional_missing, optional_detail = compute_skill_coverage(optional_skills, cv_skill_set, taxonomy)
+            depth_meta = depth_indicators(cv_doc, jd_required_skills)
+            depth_score_raw = aggregate_depth_score(depth_meta, jd_required_skills)
+            recency_score_raw = improved_recency(cv_doc, jd_required_skills)
+            if recency_score_raw == 0:  # fallback if no dates
+                recency_score_raw = placeholder_recency(cv_doc, jd_required_skills)
+            # Impact extraction (raw only; NOT yet added to combined_score)
+            try:
+                impact_features = extract_impact_features(cv_doc)
+            except Exception as e_imp:
+                impact_features = {"impact_events": [], "raw_impact_score": 0.0, "impact_event_count": 0, "error": str(e_imp)}
+            r['skill_mandatory_coverage'] = mandatory_cov
+            r['skill_mandatory_missing'] = mandatory_missing
+            r['skill_mandatory_detail'] = mandatory_detail
+            r['skill_optional_coverage'] = optional_cov
+            r['skill_optional_missing'] = optional_missing
+            r['skill_optional_detail'] = optional_detail
+            r['skill_depth_score_raw'] = depth_score_raw
+            r['skill_depth_indicators'] = depth_meta
+            r['skill_recency_score_raw'] = recency_score_raw
+            r['impact_raw_score'] = impact_features.get('raw_impact_score', 0.0)
+            r['impact_event_count'] = impact_features.get('impact_event_count', 0)
+            if show_details:
+                r['impact_events'] = impact_features.get('impact_events', [])
+            coverage_values.append(mandatory_cov)
+            depth_raw_values.append(depth_score_raw)
+            recency_raw_values.append(recency_score_raw)
+            impact_raw_values.append(r['impact_raw_score'])
+        coverage_threshold = dynamic_coverage_threshold(coverage_values)
+        def _p_bounds(vals: list):
+            if not vals:
+                return 0.0, 1.0, 1.0
+            s = sorted(vals)
+            p5 = s[int(0.05 * (len(s)-1))]
+            p95 = s[int(0.95 * (len(s)-1))]
+            spread = p95 - p5 if p95 != p5 else 1.0
+            return p5, p95, spread
+        depth_p5, depth_p95, depth_spread = _p_bounds(depth_raw_values)
+        rec_p5, rec_p95, rec_spread = _p_bounds(recency_raw_values)
+        impact_p5, impact_p95, impact_spread = _p_bounds(impact_raw_values)
+        # Skill coverage bonus weights
+        MANDATORY_COVERAGE_BONUS_WEIGHT = 0.10
+        OPTIONAL_COVERAGE_BONUS_WEIGHT = 0.05
+        # Optional semantic relevance cache (only if details requested to avoid extra embeddings cost)
+        semantic_cache = None
+        embed_fn = None
+        if show_details and bool(config.get('search', {}).get('semantic_skill_relevance', True)):
+            try:
+                # Load taxonomy raw yaml for alias expansion (yaml already imported globally)
+                tax_path = os.path.join(os.getcwd(), 'skills_taxonomy.yaml')
+                with open(tax_path, 'r', encoding='utf-8') as f:
+                    taxonomy_raw = yaml.safe_load(f) or {}
+                emb_model = config.get('embedding', {}).get('model', 'mxbai-embed-large')
+                ollama_emb = OllamaEmbeddings(model=emb_model)
+                embed_fn = lambda text: ollama_emb.embed_query(text)
+                semantic_cache = load_skill_semantic_cache(taxonomy_raw, embed_fn)
+            except Exception as e_sem:
+                logger.warning(f"Semantic skill cache init failed: {e_sem}")
+                semantic_cache = None
+                embed_fn = None
+        for r in results:
+            r['eligibility_gated_out'] = r['skill_mandatory_coverage'] < coverage_threshold
+            d_norm = (r['skill_depth_score_raw'] - depth_p5) / depth_spread
+            r['skill_depth_score'] = 0.0 if d_norm < 0 else (1.0 if d_norm > 1 else d_norm)
+            rr_norm = (r['skill_recency_score_raw'] - rec_p5) / rec_spread
+            r['skill_recency_score'] = 0.0 if rr_norm < 0 else (1.0 if rr_norm > 1 else rr_norm)
+            ir_norm = (r['impact_raw_score'] - impact_p5) / impact_spread
+            r['impact_score'] = 0.0 if ir_norm < 0 else (1.0 if ir_norm > 1 else ir_norm)
+            if not r['eligibility_gated_out']:
+                apply_skill_and_impact_adjustments(r, mandatory_skills, config, show_details=show_details,
+                                                   semantic_cache=semantic_cache, embed_fn=embed_fn)
+        # Sort full set once
+        results.sort(key=lambda x: x.get('combined_score', x.get('total_score', 0.0)), reverse=True)
+        gated_ids = [r['cv_id'] for r in results if r.get('eligibility_gated_out')]
+        eligible_results = [r for r in results if not r.get('eligibility_gated_out')]
+        fill_used = 0
+        # If we don't have enough eligible candidates to satisfy top_k, backfill with gated ones (clearly marked)
+        if len(eligible_results) < top_k_cvs and gated_ids:
+            deficit = top_k_cvs - len(eligible_results)
+            backfill = [r for r in results if r.get('eligibility_gated_out')][:deficit]
+            for bf in backfill:
+                bf['eligibility_backfilled'] = True  # mark explicitly
+            eligible_results.extend(backfill)
+            fill_used = len(backfill)
+        results = eligible_results[:top_k_cvs]
+        logger.info(
+            f"Final candidate selection top_k={top_k_cvs} eligible={len(eligible_results)-fill_used} backfilled={fill_used} gated_out_total={len(gated_ids)} coverage_threshold={coverage_threshold}"
+            f" depth_calib=({depth_p5:.3f},{depth_p95:.3f}) recency_calib=({rec_p5:.3f},{rec_p95:.3f})"
+        )
+
+        # Fetch actual identifiers (email/phone) from MongoDB for each CV
+        # Use the multi-tenant database (company-specific) to get real identifiers
+        cv_inserter_for_lookup = CVDataInserter(
+            connection_string=config["mongodb"]["connection_string"],
+            db_name=db_name_dyn,
+            collection_name=cv_collection_mongo
+        )
+        if not cv_inserter_for_lookup.connect_to_database():
+            logger.warning("Failed to connect to MongoDB for identifier lookup")
+        
         response = []
         for result in results:
             cv_id = result["cv_id"]
-            original_identifier = searcher.get_email_from_cv_id(cv_id)
+            
+            # Fetch the actual email/phone from MongoDB instead of using hash
+            original_identifier = cv_id  # Default to hash if lookup fails
+            candidate_name = "Unknown"
+            try:
+                if cv_inserter_for_lookup.collection is not None:
+                    doc = cv_inserter_for_lookup.collection.find_one(
+                        {"_id": cv_id}, 
+                        {"email": 1, "phone": 1, "name": 1}
+                    )
+                    if doc:
+                        original_identifier = doc.get("email") or doc.get("phone") or cv_id
+                        candidate_name = doc.get("name", "Unknown")
+                        logger.debug(f"Resolved cv_id {cv_id[:8]}... to {original_identifier}, name: {candidate_name}")
+            except Exception as e:
+                logger.warning(f"Failed to lookup identifier for cv_id {cv_id}: {e}")
+            
+            section_scores_to_use = result.get("cross_encoder_section_scores", result["section_scores"])
+            logger.info(f"CV {cv_id[:8]}... section_scores keys: {list(section_scores_to_use.keys()) if section_scores_to_use else 'None'}")
+            
             response.append({
                 "cv_id": cv_id,
                 "original_identifier": original_identifier,
+                "name": candidate_name,
                 "total_score": result["total_score"],
                 "bm25_score": result.get("bm25_score"),
                 "cross_encoder_score": result.get("cross_encoder_score"),
                 "combined_score": result.get("combined_score"),
                 "ce_status": result.get("ce_status"),
-                "section_scores": result.get("cross_encoder_section_scores", result["section_scores"]),
+                "section_scores": section_scores_to_use,
                 "section_details": result["section_details"] if show_details else {}
             })
+        
+        # Close the lookup connection
+        try:
+            cv_inserter_for_lookup.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing lookup connection: {e}")
         ce_present = any(isinstance(r.get("cross_encoder_score"), (int, float)) for r in results)
         bm25_present = any(isinstance(r.get("bm25_score"), (int, float)) for r in results)
         meta = {
@@ -937,21 +1195,115 @@ async def search_cvs(request: Request, current_user: Dict[str, Any] = Depends(ge
                 "cross_encoder_weight": cross_encoder_weight
             },
             "jd_id_used": jd_id_used,
-            "total_results": len(results),
-            "reranker_meta": reranker_meta
+            "total_results_returned": len(results),
+            "total_results_full": len(results_full),
+            "reranker_meta": reranker_meta,
+            "bm25_normalization": {
+                "method": "saturation",
+                "k": bm25_k,
+                "active": bm25_active,
+                "score_count": len(bm25_scores_list)
+            },
+            "ce_calibration": {
+                "percentile_mode": use_percentile_ce,
+                "p5": ce_p5,
+                "p95": ce_p95,
+                "spread": ce_spread
+            },
+            "section_weighting": jd_section_weights,
+            "critical_sections": critical_sections,
+            "penalty_per_missing_critical": penalty_per_missing,
+            "eligibility": {
+                "coverage_threshold": coverage_threshold,
+                "required_skills_extracted": list(mandatory_skills),
+                "optional_skills_extracted": list(optional_skills),
+                "gated_out_count": len(gated_ids),
+                "gated_out_ids": gated_ids
+            },
+            "skill_bonus_weights": {
+                "mandatory_coverage_bonus_weight": MANDATORY_COVERAGE_BONUS_WEIGHT,
+                "optional_coverage_bonus_weight": OPTIONAL_COVERAGE_BONUS_WEIGHT
+            },
+            "impact_calibration": {
+                "p5": impact_p5 if 'impact_p5' in locals() else None,
+                "p95": impact_p95 if 'impact_p95' in locals() else None,
+                "spread": impact_spread if 'impact_spread' in locals() else None
+            }
         }
+        # Ensure MongoDB connections are closed
+        try:
+            if 'jd_inserter' in locals():
+                jd_inserter.close_connection()
+            if 'cv_inserter' in locals():
+                cv_inserter.close_connection()
+        except Exception as e:
+            logger.warning(f"Error closing search connections: {e}")
+
+        # Enhance response entries with skill metrics (post-filtered)
+        for entry in response:
+            r_match = next((r for r in results if r.get('cv_id') == entry['cv_id']), None)
+            if r_match:
+                entry['skill_mandatory_coverage'] = r_match.get('skill_mandatory_coverage')
+                entry['skill_mandatory_missing'] = r_match.get('skill_mandatory_missing')
+                entry['skill_optional_coverage'] = r_match.get('skill_optional_coverage')
+                entry['skill_optional_missing'] = r_match.get('skill_optional_missing')
+                entry['skill_depth_score'] = r_match.get('skill_depth_score')
+                entry['skill_recency_score'] = r_match.get('skill_recency_score')
+                entry['skill_mandatory_detail'] = r_match.get('skill_mandatory_detail')
+                entry['skill_optional_detail'] = r_match.get('skill_optional_detail')
+                # Impact fields (raw + calibrated); detailed events only if show_details requested
+                entry['impact_raw_score'] = r_match.get('impact_raw_score')
+                entry['impact_score'] = r_match.get('impact_score')
+                entry['impact_event_count'] = r_match.get('impact_event_count')
+                if show_details:
+                    entry['impact_events'] = r_match.get('impact_events', [])
+                if show_details:
+                    entry['skill_depth_indicators'] = r_match.get('skill_depth_indicators')
+                    entry['skill_depth_score_raw'] = r_match.get('skill_depth_score_raw')
+                    entry['skill_recency_score_raw'] = r_match.get('skill_recency_score_raw')
+                    entry['combined_score_pre_impact'] = r_match.get('combined_score_pre_impact')
+
+        # Persist feature vectors (soft-fail)
+        try:
+            persist_features(
+                connection_string=config["mongodb"]["connection_string"],
+                company_name=company_name,
+                job_title=job_title,
+                candidate_records=results  # results contains enriched fields
+            )
+        except Exception as e_pf:
+            logger.warning(f"Feature persistence error (non-blocking): {e_pf}")
+
         return JSONResponse(content={
             "status": "success",
             "results": response,
             "company_name": company_name,
             "job_title": job_title,
             "jd_id_used": jd_id_used,
+            "rerank_mode": rerank_mode,
+            "cross_encoder_enabled": enable_cross_encoder and reranker is not None,
             "meta": meta
         })
     except HTTPException as e:
+        # Cleanup connections on error
+        try:
+            if 'jd_inserter' in locals():
+                jd_inserter.close_connection()
+            if 'cv_inserter' in locals():
+                cv_inserter.close_connection()
+        except Exception:
+            pass
         logger.warning(f"Search validation or processing error: {e.detail}")
         raise e
     except Exception as e:
+        # Cleanup connections on error
+        try:
+            if 'jd_inserter' in locals():
+                jd_inserter.close_connection()
+            if 'cv_inserter' in locals():
+                cv_inserter.close_connection()
+        except Exception:
+            pass
         logger.error(f"Unexpected error searching CVs: {e}")
         raise HTTPException(status_code=500, detail=f"Error searching CVs: {str(e)}")
 
@@ -1214,7 +1566,12 @@ async def bulk_delete_cvs(
     
     try:
         # Build collection and DB names
-        _, cv_persist_dir = build_persist_directories(company_name, job_title)
+        # build_persist_directories expects (cv_root, jd_root, company)
+        cv_persist_dir, _ = build_persist_directories(
+            config["chroma"]["cv_persist_dir"],
+            config["chroma"]["jd_persist_dir"],
+            company_name
+        )
         cv_mongo_db, cv_mongo_coll, _ = build_mongo_names(company_name, job_title)
         
         # Delete from MongoDB
@@ -1267,7 +1624,11 @@ async def bulk_delete_jds(
             deleted_count = result.deleted_count
             
             # Delete JD ChromaDB
-            jd_persist_dir, _ = build_persist_directories(company_name, job_title)
+            jd_persist_dir, _ = build_persist_directories(
+                config["chroma"]["cv_persist_dir"],
+                config["chroma"]["jd_persist_dir"],
+                company_name
+            )
             import chromadb
             chroma_client = chromadb.PersistentClient(path=jd_persist_dir)
             _, jd_coll_name = build_collection_names(company_name, job_title)
@@ -1362,7 +1723,11 @@ async def reindex_embeddings(
                 cvs = list(db[coll_name].find({}))
                 if cvs:
                     # Rebuild embeddings
-                    jd_persist_dir, cv_persist_dir = build_persist_directories(company_name, job_title)
+                    jd_persist_dir, cv_persist_dir = build_persist_directories(
+                        config["chroma"]["cv_persist_dir"],
+                        config["chroma"]["jd_persist_dir"],
+                        company_name
+                    )
                     embedder = CVEmbedder(
                         model=config["embedding"]["model"],
                         persist_directory=cv_persist_dir,
@@ -1382,7 +1747,11 @@ async def reindex_embeddings(
                 
                 jds = list(db[coll_name].find({}))
                 if jds:
-                    jd_persist_dir, _ = build_persist_directories(company_name, job_title)
+                    jd_persist_dir, _ = build_persist_directories(
+                        config["chroma"]["cv_persist_dir"],
+                        config["chroma"]["jd_persist_dir"],
+                        company_name
+                    )
                     embedder = JDEmbedder(
                         model=config["embedding"]["model"],
                         persist_directory=jd_persist_dir,

@@ -8,8 +8,11 @@ A modern web application for uploading CVs and job descriptions, then getting in
 - **Multiple File Format Support**: 
   - CVs: PDF, DOCX, PNG, JPG, JPEG
   - Job Descriptions: TXT, PDF, DOCX
-- **Real-time Scoring**: Advanced vector similarity matching
-- **Detailed Results**: Section-wise scoring with visual progress bars
+- **Hybrid Scoring Engine**: Vector similarity + BM25 + cross-encoder + calibrated skill & impact signals
+- **Skill-Aware Ranking**: Mandatory vs optional skills with gating + bonus weighting
+- **Impact-Aware Ranking**: Quantified achievement (verb + metric + outcome) extraction with relevance filtering to required skills
+- **Interpretability**: Per-candidate `score_components`, skill coverage, depth, recency, impact events (details mode)
+- **Real-time Scoring**: Efficient multi-stage retrieval and fusion
 - **Modern UI**: Responsive design with Bootstrap 5
 - **Email Display**: Shows original email addresses instead of hashed IDs
 
@@ -72,7 +75,7 @@ Make sure you have the following installed:
 - `POST /upload-jd/` - Upload and process job description files
 
 ### Search & Scoring
-- `POST /search-cvs/` - Search and score CVs against job description
+- `POST /search-cvs/` - Search and score CVs against job description (returns hybrid + skill + impact enriched ranking)
 
 ### Health Check
 - `GET /health` - API health status
@@ -101,10 +104,15 @@ chroma:
   cv_collection_name: "cv_sections"
   jd_collection_name: "job_descriptions"
 
-# Search Configuration
+# Search Configuration (extended)
 search:
   top_k_per_section: 5
   top_k_cvs: 5
+  impact_weight: 0.08                 # Max contribution of calibrated impact score (scaled by relevance)
+  mandatory_strength_factor: 0.15     # Multiplicative boost: base_score * (1 + mandatory_coverage * factor)
+  impact_min_relevance: 0.0           # Minimum fraction of impact events referencing mandatory skills before any impact weight applies
+  semantic_skill_relevance: true      # Enable lexical + alias + semantic embedding fallback relevance for impact events
+  semantic_relevance_threshold: 0.65  # Cosine similarity threshold for embedding fallback (only if no lexical/alias match)
 ```
 
 ## File Structure
@@ -124,6 +132,83 @@ search:
 ```
 
 ## Troubleshooting
+### Impact & Skill Scoring FAQs
+
+1. **Why did a candidate with big achievements rank lower?** Their impact events may not reference mandatory job skills (relevance ratio low → impact component suppressed).
+2. **Why is impact_component zero?** Either fewer than 2 impact events detected, relevance below `impact_min_relevance`, or `impact_weight` set to 0.
+3. **How to emphasize required skills more?** Raise `mandatory_strength_factor` (e.g., 0.25). Keep it modest to avoid drowning other signals.
+4. **How is impact relevance computed?** Fraction of impact sentences containing at least one mandatory skill token (case-insensitive word-boundary match).
+5. **What is `combined_score_pre_impact`?** Snapshot after skill bonuses and mandatory strength boost, before adding impact contribution (used for evaluation deltas).
+6. **How are semantic skill matches applied?** If an impact sentence has no direct lexical or alias match to a mandatory skill, we embed the sentence and the skill terms and apply a cosine similarity threshold (`semantic_relevance_threshold`). Only sentences above the threshold and not "too short" (to avoid generic phrases) count. This improves recall without inflating weak matches.
+
+### Tuning Workflow
+
+| Objective | Recommended Adjustments |
+|-----------|-------------------------|
+| Reduce noise from spurious metrics | Increase `impact_min_relevance` to 0.2–0.3 |
+| Emphasize required skills strongly | Increase `mandatory_strength_factor` up to 0.25 |
+| De-emphasize achievements overall | Lower `impact_weight` (e.g., 0.04) |
+| Inspect relevance issues | Enable `show_details` and review `impact_relevance_skills` |
+| Improve semantic skill recovery in impact sentences | Set `semantic_skill_relevance: true` and threshold 0.63–0.67 |
+| Be more conservative with semantic matches | Raise `semantic_relevance_threshold` toward 0.70 |
+
+**Threshold Notes**
+- Start with `semantic_relevance_threshold: 0.65` (balanced precision/recall)
+- Raise threshold if unrelated sentences are counted
+- Lower (to ~0.62) only if many true skill-linked impact sentences are missed
+- Keep `impact_min_relevance` at 0.0–0.15 initially; increase only if generic achievements dominate
+
+### Evaluation
+You can quantify scoring improvements using the provided evaluation harness.
+See full methodology in [`docs/EVALUATION.md`](./docs/EVALUATION.md).
+
+**Key Metrics**
+- `precision_at_k`: How many of the top-k retrieved CVs are known relevant
+- `reciprocal_rank`: Position of the first relevant CV (higher is better)
+- `spearman_rank_corr`: Correlation between previous and new ranking (measures stability or intentional shift)
+- `lift_stats`: Aggregate improvement: average delta, % improved, % unchanged, % regressed
+
+**Workflow**
+1. Label a small set of CVs as relevant/non-relevant for at least one JD (store labels or keep a mapping file)
+2. Run scoring with current parameters (capture `combined_score_pre_impact` & `combined_score`)
+3. Execute the evaluation script to produce a JSON report
+4. Inspect lift stats and metric changes; adjust thresholds (`impact_min_relevance`, `semantic_relevance_threshold`, `mandatory_strength_factor`) accordingly
+
+**Interpreting Results**
+- Large positive lift but low precision@k → Impact may be overweighting non-relevant achievements
+- High precision@k but negative lift for most → Mandatory skill weighting might be too aggressive (inflate certain profiles)
+- Low Spearman + improved precision → Acceptable if the goal was to reprioritize genuinely stronger candidates
+
+**Recommended Iteration**
+- Tune one parameter at a time until precision@k plateaus
+- Re-run after each change; keep prior JSON reports for diffing
+
+**Next Extensions (Optional)**
+- Add recall@k once you have fuller relevance labels
+- Track calibration percentiles for impact score before/after semantic relevance to ensure distribution stability
+
+### Labeled Dataset Example
+Create a lightweight ground-truth file to evaluate ranking quality. Two common formats:
+
+**JSONL (job-centric)**
+```json
+{"jd_id": "jd_123", "relevant_cv_ids": ["cv_a", "cv_c"], "non_relevant_cv_ids": ["cv_b"]}
+{"jd_id": "jd_456", "relevant_cv_ids": ["cv_d"], "non_relevant_cv_ids": []}
+```
+
+**CSV (pairwise)**
+```csv
+jd_id,cv_id,label
+jd_123,cv_a,1
+jd_123,cv_b,0
+jd_123,cv_c,1
+jd_456,cv_d,1
+```
+
+Load either form in the evaluation script and map labels to sets. For sparse labels, focus on precision@k; for denser labeling add recall@k.
+
+For full methodology and formulas see `docs/EVALUATION.md`.
+
 
 ### Common Issues
 

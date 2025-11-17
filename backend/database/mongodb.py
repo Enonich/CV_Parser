@@ -94,6 +94,11 @@ class CVDataInserter:
     def insert_cv_data(self, data):
         """Insert single CV using hashed email or phone as _id"""
         try:
+            # Ensure we have an active connection
+            if self.client is None or self.collection is None:
+                logger.error("No active database connection for insert_cv_data")
+                return False
+            
             email = data.get('email', '').strip() if data.get('email') else None
             phone = data.get('phone', '').strip() if data.get('phone') else None
             
@@ -180,21 +185,34 @@ class CVDataInserter:
     def process_cv_file(self, file_path):
         """Complete process for a single CV file"""
         logger.info("Starting CV file processing...")
+        # Track if we need to close the connection (only if we opened it here)
+        opened_connection = False
         try:
-            if not self.connect_to_database():
-                return False
+            # Only connect if not already connected
+            if self.client is None:
+                if not self.connect_to_database():
+                    return False
+                opened_connection = True
+            
             data = self.load_json_file(file_path)
             if data is None:
                 return False
             success = self.insert_cv_data(data)
             return success
         finally:
-            self.close_connection()
+            # Only close if we opened the connection in this method
+            if opened_connection:
+                self.close_connection()
 
     def get_all_cvs(self):
-        """Get all CVs from MongoDB collection."""
+        """Get all CVs from MongoDB collection.
+        
+        Note: This method does NOT close the connection. The caller is responsible
+        for connection management (typically via process_cv_file or explicit close).
+        """
         try:
-            if not self.connect_to_database():
+            # Ensure connection is established
+            if self.client is None and not self.connect_to_database():
                 logger.error("Failed to connect to MongoDB")
                 return []
             
@@ -213,13 +231,16 @@ class CVDataInserter:
         except Exception as e:
             logger.error(f"Error retrieving CVs from MongoDB: {e}")
             return []
-        finally:
-            self.close_connection()
 
     def get_cv_by_id(self, cv_id):
-        """Get a specific CV by its ID."""
+        """Get a specific CV by its ID.
+        
+        Note: This method does NOT close the connection. The caller is responsible
+        for connection management (typically via process_cv_file or explicit close).
+        """
         try:
-            if not self.connect_to_database():
+            # Ensure connection is established
+            if self.client is None and not self.connect_to_database():
                 logger.error("Failed to connect to MongoDB")
                 return None
             
@@ -238,13 +259,16 @@ class CVDataInserter:
         except Exception as e:
             logger.error(f"Error retrieving CV by ID: {e}")
             return None
-        finally:
-            self.close_connection()
 
     def check_cv_exists(self, email=None, phone=None):
-        """Check if a CV already exists in the database based on email or phone."""
+        """Check if a CV already exists in the database based on email or phone.
+        
+        Note: This method does NOT close the connection to allow subsequent operations
+        on the same instance. The caller is responsible for connection management.
+        """
         try:
-            if not self.connect_to_database():
+            # Ensure connection is established
+            if self.client is None and not self.connect_to_database():
                 logger.error("Failed to connect to MongoDB")
                 return None
             
@@ -265,8 +289,6 @@ class CVDataInserter:
         except Exception as e:
             logger.error(f"Error checking CV existence: {e}")
             return None
-        finally:
-            self.close_connection()
 
             
 # Example usage:

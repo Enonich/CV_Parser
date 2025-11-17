@@ -301,30 +301,59 @@ $('#close-job-details')?.addEventListener('click', () => {
 });
 
 /* ==================== TAB NAVIGATION ==================== */
+function showTab(tab, pushState = true) {
+  // Hide all sections
+  $$('section').forEach(s => s.classList.add('hidden'));
+  const section = $(`#${tab}`);
+  if (section) {
+    section.classList.remove('hidden');
+  }
+
+  // Update active tab styling
+  $$('.tab-link').forEach(l => {
+    l.classList.remove('text-blue-700', 'font-medium');
+    l.classList.add('text-gray-600');
+  });
+  
+  $$(`[data-tab="${tab}"]`).forEach(l => {
+    l.classList.remove('text-gray-600');
+    l.classList.add('text-blue-700', 'font-medium');
+  });
+
+  if (pushState) {
+    // Add to browser history
+    history.pushState({ tab: tab }, ``, `#${tab}`);
+  }
+
+  if (tab === 'dashboard') loadDashboard();
+}
+
 $$('.tab-link').forEach(link => {
   link.addEventListener('click', e => {
     e.preventDefault();
     const tab = link.dataset.tab;
-    
-    // Hide all sections
-    $$('section').forEach(s => s.classList.add('hidden'));
-    $(`#${tab}`).classList.remove('hidden');
-
-    // Update active tab styling
-    $$('.tab-link').forEach(l => {
-      l.classList.remove('text-blue-700', 'font-medium');
-      l.classList.add('text-gray-600');
-    });
-    
-    // Highlight clicked tab (all instances with same data-tab)
-    $$(`[data-tab="${tab}"]`).forEach(l => {
-      l.classList.remove('text-gray-600');
-      l.classList.add('text-blue-700', 'font-medium');
-    });
-
-    if (tab === 'dashboard') loadDashboard();
-    // loadCompanies not needed for users - jobs already loaded
+    showTab(tab);
   });
+});
+
+// Handle browser back/forward buttons
+window.addEventListener('popstate', e => {
+  if (e.state && e.state.tab) {
+    showTab(e.state.tab, false); // Don't push state again
+  } else {
+    // Fallback to dashboard if no state
+    showTab('dashboard', false);
+  }
+});
+
+// Initial load handler
+document.addEventListener('DOMContentLoaded', () => {
+  const hash = window.location.hash.substring(1);
+  if (hash) {
+    showTab(hash, false);
+  } else {
+    showTab('dashboard', true);
+  }
 });
 
 /* ==================== DRAG & DROP ==================== */
@@ -453,6 +482,10 @@ $('#cv-form').addEventListener('submit', async e => {
   const progressDiv = $('#cv-upload-progress');
   const progressBar = $('#cv-progress-bar');
   const progressText = $('#cv-progress-text');
+  const successPrompt = $('#cv-upload-success-prompt');
+
+  // Hide previous success prompt
+  successPrompt.classList.add('hidden');
 
   const input = form.querySelector('input[type="file"]');
   const files = Array.from(input.files);
@@ -464,6 +497,17 @@ $('#cv-form').addEventListener('submit', async e => {
 
   const company = userCompany || form.querySelector('input[name="company_name"]').value;
   const job = form.querySelector('input[name="job_title"]').value;
+
+  // Validate that job title is not empty and not the same as company name
+  if (!job || !job.trim()) {
+    showToast('Please enter a job title', true);
+    return;
+  }
+  
+  if (job.toLowerCase().trim() === company.toLowerCase().trim()) {
+    showToast('Job title cannot be the same as company name. Please enter a specific job role (e.g., "Software Engineer", "Data Analyst")', true);
+    return;
+  }
 
   submitBtn.disabled = true;
   spinner.classList.remove('hidden');
@@ -497,7 +541,18 @@ $('#cv-form').addEventListener('submit', async e => {
       
       if (!res.ok) {
         errorCount++;
-        console.error(`[CV Upload] Failed to upload ${file.name}:`, data.detail || data);
+        const errorMsg = data.message || data.detail || 'Upload failed';
+        console.error(`[CV Upload] Failed to upload ${file.name}:`, errorMsg);
+        // Show individual error for critical failures
+        if (data.error_code === 'missing_identifier') {
+          showToast(`${file.name}: ${errorMsg}`, true);
+        }
+      } else if (data.status === 'error') {
+        // Backend returned 200 but with error status (shouldn't happen after our fix, but defensive)
+        errorCount++;
+        const errorMsg = data.message || 'Database save failed';
+        console.error(`[CV Upload] ${file.name} processing error:`, errorMsg);
+        showToast(`${file.name}: ${errorMsg}`, true);
       } else if (data.duplicate_within_job || data.existing_other_job_same_company) {
         duplicateCount++;
         console.log(`[CV Upload] ${file.name} is a duplicate`);
@@ -508,6 +563,7 @@ $('#cv-form').addEventListener('submit', async e => {
     } catch (err) {
       errorCount++;
       console.error(`[CV Upload] Error uploading ${file.name}:`, err);
+      showToast(`${file.name}: Network or server error`, true);
     }
   }
 
@@ -536,7 +592,20 @@ $('#cv-form').addEventListener('submit', async e => {
   spinner.classList.add('hidden');
   text.textContent = 'Parse & Save CVs';
   
-  $('.tab-link[data-tab="dashboard"]').click();
+  // Show the next step prompt if successful
+  if (successCount > 0) {
+    successPrompt.classList.remove('hidden');
+    const goToJdBtn = $('#go-to-jd-btn');
+    goToJdBtn.onclick = () => {
+      showTab('upload-jd');
+      // Pre-fill the job title in the JD form
+      $('#upload-jd input[name="job_title"]').value = job;
+      successPrompt.classList.add('hidden'); // Hide after clicking
+    };
+  } else {
+    // If no files were successfully uploaded, go to dashboard
+    showTab('dashboard');
+  }
 });
 
 /* ==================== UPLOAD JD ==================== */
@@ -546,6 +615,20 @@ $('#jd-form').addEventListener('submit', async e => {
   const submitBtn = form.querySelector('button[type="submit"]');
   const spinner = $('#jd-spinner');
   const text = $('#jd-submit-text');
+
+  // Validate job title before proceeding
+  const company = userCompany || form.querySelector('input[name="company_name"]').value;
+  const job = form.querySelector('input[name="job_title"]').value;
+  
+  if (!job || !job.trim()) {
+    showToast('Please enter a job title', true);
+    return;
+  }
+  
+  if (job.toLowerCase().trim() === company.toLowerCase().trim()) {
+    showToast('Job title cannot be the same as company name. Please enter a specific job role (e.g., "Software Engineer", "Data Analyst")', true);
+    return;
+  }
 
   submitBtn.disabled = true;
   spinner.classList.remove('hidden');
@@ -581,9 +664,23 @@ $('#jd-form').addEventListener('submit', async e => {
   }
 
   try {
-  const res = await authFetch(`${API_BASE}/upload-jd/`, { method: 'POST', body: formData });
+    const res = await authFetch(`${API_BASE}/upload-jd/`, { method: 'POST', body: formData });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || 'JD upload failed');
+    
+    console.log(`[JD Upload] Response status: ${res.status}`, data);
+    
+    if (!res.ok) {
+      const errorMsg = data.message || data.detail || 'JD upload failed';
+      console.error(`[JD Upload] Failed:`, errorMsg);
+      throw new Error(errorMsg);
+    }
+    
+    if (data.status === 'error') {
+      // Backend returned 200 but with error status (shouldn't happen after our fix, but defensive)
+      const errorMsg = data.message || 'Database save failed';
+      console.error(`[JD Upload] Processing error:`, errorMsg);
+      throw new Error(errorMsg);
+    }
 
     currentCompany = formData.get('company_name');
     currentJob = formData.get('job_title');
@@ -592,7 +689,7 @@ $('#jd-form').addEventListener('submit', async e => {
     if (data.existing) {
       showToast('JD already exists');
     } else {
-      showToast('JD saved and embedded!');
+      showToast('JD saved successfully!');
       addActivity(`Uploaded JD: ${currentJob}`);
     }
     if (userRole !== 'admin') loadUserJobs(); // Refresh job list for users
@@ -605,6 +702,7 @@ $('#jd-form').addEventListener('submit', async e => {
     
     $('.tab-link[data-tab="dashboard"]').click();
   } catch (err) {
+    console.error('[JD Upload] Error:', err);
     showToast(err.message, true);
   } finally {
     submitBtn.disabled = false;
@@ -759,19 +857,25 @@ if (searchBtn) {
     const btnText = btn.querySelector('span');
     const originalText = btnText.textContent;
     
+    // Get the top_k value from the input field
+    const topKInput = $('#search-top-k');
+    let topK = parseInt(topKInput.value) || 10;
+    if (topK < 1) topK = 1;
+    if (topK > 100) topK = 100;
+    
     // Mark as searching
     isSearching = true;
     btn.disabled = true;
     spinner.classList.remove('hidden');
     btnText.textContent = 'Embedding & Searching...';
 
-    console.log(`[Search] Starting search for company: ${company}, job: ${job}`);
+    console.log(`[Search] Starting search for company: ${company}, job: ${job}, top_k: ${topK}`);
 
     try {
       const res = await authFetch(`${API_BASE}/search-cvs/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ company_name: company, job_title: job, top_k_cvs: 10, show_details: true })
+        body: JSON.stringify({ company_name: company, job_title: job, top_k_cvs: topK, show_details: true })
       });
       
       console.log(`[Search] Response status: ${res.status}`);
@@ -789,7 +893,9 @@ if (searchBtn) {
       if (data.results && data.results.length > 0) {
         console.log('[Search] All result scores:');
         data.results.forEach((r, idx) => {
-          console.log(`  ${idx + 1}. ${r.original_identifier || r.cv_id}`);
+          const displayName = r.name || r.original_identifier || r.cv_id;
+          const displayContact = (r.name && r.original_identifier) ? ` (${r.original_identifier})` : '';
+          console.log(`  ${idx + 1}. ${displayName}${displayContact}`);
           console.log(`     Vector: ${r.total_score?.toFixed(4)}, Reranker: ${r.cross_encoder_score?.toFixed(4)}, Combined: ${r.combined_score?.toFixed(4)}`);
         });
       }
@@ -818,7 +924,10 @@ if (searchBtn) {
       currentJob = job;
       updateContextDisplay();
       displayResults(data.results);
-      $('#last-search').textContent = `${data.results.length} results`;
+      const lastSearchEl = $('#last-search');
+      if (lastSearchEl) {
+        lastSearchEl.textContent = `${data.results.length} results`;
+      }
       addActivity(`Searched CVs for ${job} - Found ${data.results.length} matches`);
       showToast(`Found ${data.results.length} matching CVs`);
       
@@ -858,11 +967,17 @@ function displayResults(results) {
     
     const card = document.createElement('div');
     card.className = 'bg-white p-5 rounded-lg shadow-sm border mb-4';
+    
+    // Display name prominently, then email/phone
+    const displayName = r.name || r.original_identifier || 'Unknown Candidate';
+    const displayContact = (r.name && r.original_identifier) ? r.original_identifier : '';
+    
     card.innerHTML = `
       <div class="flex justify-between items-start mb-4">
         <div class="flex-1">
-          <h4 class="font-semibold text-lg">${r.original_identifier || r.cv_id}</h4>
-          <p class="text-sm text-gray-600">CV ID: ${r.cv_id}</p>
+          <h4 class="font-semibold text-lg">${displayName}</h4>
+          ${displayContact ? `<p class="text-sm text-gray-700 mt-1"><i class="fas fa-envelope"></i> ${displayContact}</p>` : ''}
+          <p class="text-xs text-gray-500 mt-1">CV ID: ${r.cv_id}</p>
           ${hasReranking ? '<span class="inline-block mt-1 text-xs bg-purple-100 text-purple-700 px-2 py-1 rounded"><i class="fas fa-layer-group"></i> Reranked</span>' : ''}
         </div>
         <div class="text-right flex-shrink-0">
@@ -1088,16 +1203,17 @@ async function loadJobDashboard() {
 
     // KPI: Top Match
     if (results.length > 0) {
-      const topScore = (results[0].combined_score || results[0].total_score || 0).toFixed(1);
-      $('#kpi-top').textContent = `${topScore}%`;
+      const topScoreRaw = (results[0].combined_score || results[0].total_score || 0);
+      const topScorePct = (topScoreRaw * 100).toFixed(1);
+      $('#kpi-top').textContent = `${topScorePct}%`;
     } else {
       $('#kpi-top').textContent = '–';
     }
 
     // KPI: Average Score
     if (results.length > 0) {
-      const avg = results.reduce((sum, r) => sum + (r.combined_score || r.total_score || 0), 0) / results.length;
-      $('#kpi-avg').textContent = `${avg.toFixed(1)}%`;
+      const avgRaw = results.reduce((sum, r) => sum + (r.combined_score || r.total_score || 0), 0) / results.length;
+      $('#kpi-avg').textContent = `${(avgRaw * 100).toFixed(1)}%`;
     } else {
       $('#kpi-avg').textContent = '–';
     }
@@ -1111,15 +1227,17 @@ async function loadJobDashboard() {
     
     if (results.length > 0) {
       results.slice(0, 5).forEach((r, i) => {
-        const score = (r.combined_score || r.total_score || 0).toFixed(2);
+  const scorePct = ((r.combined_score || r.total_score || 0) * 100).toFixed(2);
+        const displayName = r.name || r.original_identifier || r.cv_id;
         const div = document.createElement('div');
         div.className = 'flex justify-between items-center py-2 border-b';
         div.innerHTML = `
           <div class="flex items-center space-x-3">
             <span class="font-bold text-blue-700">#${i+1}</span>
-            <span class="text-sm">${r.original_identifier || r.cv_id}</span>
+            <span class="text-sm font-medium">${displayName}</span>
+            ${r.original_identifier && r.name ? `<span class="text-xs text-gray-500">${r.original_identifier}</span>` : ''}
           </div>
-          <span class="font-semibold text-green-700">${score}%</span>
+          <span class="font-semibold text-green-700">${scorePct}%</span>
         `;
         container.appendChild(div);
       });
@@ -1180,16 +1298,16 @@ async function refreshDashboard() {
     // KPI: Top Match
     if (results.length > 0) {
       const top = results[0];
-      const topScore = (top.combined_score || top.total_score || 0).toFixed(1);
-      $('#kpi-top').textContent = `${topScore}%`;
+  const topScoreRaw = (top.combined_score || top.total_score || 0);
+  $('#kpi-top').textContent = `${(topScoreRaw * 100).toFixed(1)}%`;
       $('#kpi-top').className = 'text-3xl font-bold text-green-700';
     }
 
     // KPI: Avg Score
     if (results.length > 0) {
-      const avg = results.reduce((sum, r) => sum + (r.combined_score || r.total_score || 0), 0) / results.length;
-      const avgScore = avg.toFixed(1);
-      $('#kpi-avg').textContent = `${avgScore}%`;
+  const avgRaw = results.reduce((sum, r) => sum + (r.combined_score || r.total_score || 0), 0) / results.length;
+  const avgScorePct = (avgRaw * 100).toFixed(1);
+  $('#kpi-avg').textContent = `${avgScorePct}%`;
       $('#kpi-avg').className = 'text-3xl font-bold text-blue-700';
     }
 
@@ -1205,8 +1323,9 @@ async function refreshDashboard() {
     const container = $('#top-candidates');
     container.innerHTML = '';
     results.slice(0, 5).forEach((r, i) => {
-      const score = (r.combined_score || r.total_score || 0).toFixed(1);
-      const name = r.original_identifier || r.cv_id;
+  const scorePct = ((r.combined_score || r.total_score || 0) * 100).toFixed(1);
+      const displayName = r.name || r.original_identifier || r.cv_id;
+      const displayContact = (r.name && r.original_identifier) ? r.original_identifier : '';
       const card = document.createElement('div');
       card.className = 'flex justify-between items-center p-3 bg-gray-50 rounded-lg';
       card.innerHTML = `
@@ -1215,12 +1334,13 @@ async function refreshDashboard() {
             ${i + 1}
           </div>
           <div>
-            <p class="font-medium">${name}</p>
-            <p class="text-xs text-gray-500">ID: ${r.cv_id.slice(-6)}</p>
+            <p class="font-medium">${displayName}</p>
+            ${displayContact ? `<p class="text-xs text-gray-600"><i class="fas fa-envelope"></i> ${displayContact}</p>` : ''}
+            <p class="text-xs text-gray-400">ID: ${r.cv_id.slice(-8)}</p>
           </div>
         </div>
         <div class="text-right">
-          <p class="text-lg font-bold text-blue-700">${score}%</p>
+          <p class="text-lg font-bold text-blue-700">${scorePct}%</p>
           <p class="text-xs text-gray-500">Match</p>
         </div>
       `;

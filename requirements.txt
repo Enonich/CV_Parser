@@ -1,9 +1,54 @@
-fastapi
-uvicorn
-pymongo
+# Python 3.12 Compatible Requirements
+# Tested with Python 3.12.x
+
+# Web Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Database
+pymongo>=4.6.0
+
+# Authentication & Security
 passlib[bcrypt]>=1.7.4
-bcrypt>=4.0.0
-python-jose[cryptography]
-PyYAML
-python-multipart
-python-dotenv
+bcrypt>=4.1.0
+python-jose[cryptography]>=3.3.0
+pydantic>=2.5.0
+pydantic[email]
+
+# Configuration
+PyYAML>=6.0.1
+python-dotenv>=1.0.0
+
+# Machine Learning & NLP
+torch>=2.1.0
+transformers>=4.35.0
+sentence-transformers>=2.2.2
+numpy>=1.26.0
+
+# LangChain & Embeddings
+langchain>=0.1.0
+langchain-community>=0.0.10
+langchain-chroma>=0.1.0
+langchain-ollama>=0.1.0
+chromadb>=0.4.22
+
+# Document Processing
+docstrange>=0.1.0
+python-docx>=1.1.0
+PyPDF2>=3.0.0
+Pillow>=10.1.0
+
+# Text Processing & Similarity
+rapidfuzz>=3.5.0
+python-dateutil>=2.8.2
+
+# Optional: LLama Cloud (for advanced extraction)
+# llama-cloud-services
+
+# HTTP & Utilities
+requests>=2.31.0
+
+# Note: Make sure Ollama is installed separately for embeddings
+# Download from: https://ollama.ai
+

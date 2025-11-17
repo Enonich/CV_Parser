@@ -21,6 +21,7 @@ chroma:
 search:
   top_k_per_section: 5
   top_k_cvs: 5
+  max_top_k_cvs: 100  # Upper safety bound for user requests
   enable_cross_encoder: true
   cross_encoder_model: "cross-encoder/ms-marco-MiniLM-L-6-v2"
   enable_bm25: true  # Enable BM25 keyword-based scoring
