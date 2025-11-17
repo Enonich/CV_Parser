@@ -301,30 +301,59 @@ $('#close-job-details')?.addEventListener('click', () => {
 });
 
 /* ==================== TAB NAVIGATION ==================== */
+function showTab(tab, pushState = true) {
+  // Hide all sections
+  $$('section').forEach(s => s.classList.add('hidden'));
+  const section = $(`#${tab}`);
+  if (section) {
+    section.classList.remove('hidden');
+  }
+
+  // Update active tab styling
+  $$('.tab-link').forEach(l => {
+    l.classList.remove('text-blue-700', 'font-medium');
+    l.classList.add('text-gray-600');
+  });
+  
+  $$(`[data-tab="${tab}"]`).forEach(l => {
+    l.classList.remove('text-gray-600');
+    l.classList.add('text-blue-700', 'font-medium');
+  });
+
+  if (pushState) {
+    // Add to browser history
+    history.pushState({ tab: tab }, ``, `#${tab}`);
+  }
+
+  if (tab === 'dashboard') loadDashboard();
+}
+
 $$('.tab-link').forEach(link => {
   link.addEventListener('click', e => {
     e.preventDefault();
     const tab = link.dataset.tab;
-    
-    // Hide all sections
-    $$('section').forEach(s => s.classList.add('hidden'));
-    $(`#${tab}`).classList.remove('hidden');
-
-    // Update active tab styling
-    $$('.tab-link').forEach(l => {
-      l.classList.remove('text-blue-700', 'font-medium');
-      l.classList.add('text-gray-600');
-    });
-    
-    // Highlight clicked tab (all instances with same data-tab)
-    $$(`[data-tab="${tab}"]`).forEach(l => {
-      l.classList.remove('text-gray-600');
-      l.classList.add('text-blue-700', 'font-medium');
-    });
-
-    if (tab === 'dashboard') loadDashboard();
-    // loadCompanies not needed for users - jobs already loaded
+    showTab(tab);
   });
+});
+
+// Handle browser back/forward buttons
+window.addEventListener('popstate', e => {
+  if (e.state && e.state.tab) {
+    showTab(e.state.tab, false); // Don't push state again
+  } else {
+    // Fallback to dashboard if no state
+    showTab('dashboard', false);
+  }
+});
+
+// Initial load handler
+document.addEventListener('DOMContentLoaded', () => {
+  const hash = window.location.hash.substring(1);
+  if (hash) {
+    showTab(hash, false);
+  } else {
+    showTab('dashboard', true);
+  }
 });
 
 /* ==================== DRAG & DROP ==================== */
@@ -453,6 +482,10 @@ $('#cv-form').addEventListener('submit', async e => {
   const progressDiv = $('#cv-upload-progress');
   const progressBar = $('#cv-progress-bar');
   const progressText = $('#cv-progress-text');
+  const successPrompt = $('#cv-upload-success-prompt');
+
+  // Hide previous success prompt
+  successPrompt.classList.add('hidden');
 
   const input = form.querySelector('input[type="file"]');
   const files = Array.from(input.files);
@@ -559,7 +592,20 @@ $('#cv-form').addEventListener('submit', async e => {
   spinner.classList.add('hidden');
   text.textContent = 'Parse & Save CVs';
   
-  $('.tab-link[data-tab="dashboard"]').click();
+  // Show the next step prompt if successful
+  if (successCount > 0) {
+    successPrompt.classList.remove('hidden');
+    const goToJdBtn = $('#go-to-jd-btn');
+    goToJdBtn.onclick = () => {
+      showTab('upload-jd');
+      // Pre-fill the job title in the JD form
+      $('#upload-jd input[name="job_title"]').value = job;
+      successPrompt.classList.add('hidden'); // Hide after clicking
+    };
+  } else {
+    // If no files were successfully uploaded, go to dashboard
+    showTab('dashboard');
+  }
 });
 
 /* ==================== UPLOAD JD ==================== */

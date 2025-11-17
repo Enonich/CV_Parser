@@ -183,6 +183,15 @@
           <p id="cv-progress-text" class="text-sm text-gray-600 text-center mt-2">Uploading 0 of 0 files...</p>
         </div>
       </form>
+
+      <!-- Success prompt for next step -->
+      <div id="cv-upload-success-prompt" class="hidden max-w-lg mx-auto mt-8 text-center p-6 bg-green-50 border border-green-200 rounded-lg">
+          <h3 class="text-lg font-semibold text-green-800">CVs Uploaded Successfully!</h3>
+          <p class="text-sm text-gray-600 mt-2 mb-4">Do you need to add or update the Job Description for this role?</p>
+          <button type="button" id="go-to-jd-btn" class="bg-green-700 text-white px-6 py-2 rounded-lg hover:bg-green-800 transition-colors">
+              Next: Add Job Description
+          </button>
+      </div>
     </section>
 
     <!-- Upload JD -->
