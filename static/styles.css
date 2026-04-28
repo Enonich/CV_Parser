@@ -96,3 +96,51 @@
 .section-token:hover .label {
   color: #1d4ed8; /* blue-700 */
 }
+
+/* ==================== Agent Chat Styling ==================== */
+#agent-chat-messages {
+  scroll-behavior: smooth;
+}
+
+#agent-chat-messages::-webkit-scrollbar {
+  width: 8px;
+}
+
+#agent-chat-messages::-webkit-scrollbar-track {
+  background: #f3f4f6;
+  border-radius: 4px;
+}
+
+#agent-chat-messages::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 4px;
+}
+
+#agent-chat-messages::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+.agent-suggestion-btn {
+  transition: all 0.2s ease;
+}
+
+.agent-suggestion-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Agent message animation */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+#agent-chat-messages > div {
+  animation: slideIn 0.3s ease-out;
+}

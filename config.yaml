@@ -10,6 +10,10 @@ mongodb:
 embedding:
   model: "mxbai-embed-large"
 
+# LLM Configuration for Agent
+llm_model: "llama3.2:latest"
+ollama_url: "http://localhost:11434"
+
 # Chroma Vector Store Configuration
 chroma:
   cv_persist_dir: "./chroma_db"

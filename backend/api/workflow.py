@@ -42,6 +42,7 @@ from backend.extractors.impact_extraction import extract_impact_features
 from backend.core.impact_relevance import compute_impact_relevance  # impact relevance to mandatory skills
 from backend.core.scoring_utils import apply_skill_and_impact_adjustments  # factored scoring adjustments
 from backend.core.semantic_skill_matcher import load_skill_semantic_cache  # semantic cache builder
+from backend.core.agent import CVScoringContext, CVExplainabilityAgent, BatchCVScoringContext, BatchCVExplainabilityAgent  # HR explainability agent
 from langchain_ollama import OllamaEmbeddings
 from langchain_chroma import Chroma
 import logging
@@ -54,6 +55,10 @@ logger = logging.getLogger(__name__)
 from threading import Lock
 _context_lock = Lock()
 _last_context: Dict[str, str] = {"company_name": "", "job_title": ""}
+
+# In-memory agent sessions (session_id -> agent instance)
+_agent_sessions: Dict[str, CVExplainabilityAgent] = {}
+_agent_sessions_lock = Lock()
 
 # Load configuration from root directory
 config_path = os.path.join(os.path.dirname(__file__), '../../config.yaml')
@@ -1936,7 +1941,370 @@ async def export_logs(current_user: dict = Depends(get_current_user)):
     
     return FileResponse(temp_path, filename="system_logs.csv", media_type="text/csv")
 
+# ==================== AGENT ENDPOINTS ====================
+
+@app.post("/agent/session")
+async def create_agent_session(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Create a new agent session for a specific CV and JD.
+    This initializes the RAG agent with full context including scoring results.
+    
+    Request body:
+    {
+        "cv_id": "candidate_cv_id",
+        "jd_id": "job_description_id",
+        "company_name": "company",
+        "job_title": "job_title",
+        "scoring_result": {...}  // Optional: full scoring result from /search-cvs/
+    }
+    
+    Returns:
+    {
+        "session_id": "unique_session_id",
+        "summary": {...},
+        "suggested_questions": [...]
+    }
+    """
+    try:
+        body = await request.json()
+        cv_id = body.get("cv_id")
+        jd_id = body.get("jd_id")
+        company_name = body.get("company_name")
+        job_title = body.get("job_title")
+        scoring_result = body.get("scoring_result", {})
+        
+        if not cv_id or not jd_id or not company_name or not job_title:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required fields: cv_id, jd_id, company_name, job_title"
+            )
+        
+        # Check company access
+        _enforce_company_access(company_name, current_user)
+        
+        # Get dynamic collection names
+        db_name_dyn, cv_collection_mongo, jd_collection_mongo = build_mongo_names(
+            company_name, job_title
+        )
+        
+        # Connect to MongoDB collections
+        mongo_client = MongoClient(config["mongodb"]["connection_string"])
+        cv_collection = mongo_client[db_name_dyn][cv_collection_mongo]
+        jd_collection = mongo_client[db_name_dyn][jd_collection_mongo]
+        
+        # Create context
+        logger.info(f"Creating context for CV: {cv_id}, JD: {jd_id}")
+        context = CVScoringContext(
+            cv_id=cv_id,
+            jd_id=jd_id,
+            cv_collection=cv_collection,
+            jd_collection=jd_collection,
+            scoring_result=scoring_result,
+            company_name=company_name
+        )
+        
+        # Load CV and JD data
+        try:
+            context.load_cv_data()
+            logger.info(f"CV data loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load CV data: {e}")
+            raise HTTPException(status_code=404, detail=f"CV not found: {str(e)}")
+        
+        try:
+            context.load_jd_data()
+            logger.info(f"JD data loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load JD data: {e}")
+            raise HTTPException(status_code=404, detail=f"JD not found: {str(e)}")
+        
+        # Initialize agent
+        logger.info(f"Initializing agent with config")
+        try:
+            agent = CVExplainabilityAgent(
+                context=context,
+                config=config,
+                company_name=company_name
+            )
+            logger.info(f"Agent initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize agent: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to initialize agent: {str(e)}")
+        
+        # Generate unique session ID
+        import uuid
+        session_id = str(uuid.uuid4())
+        
+        # Store agent in session cache
+        with _agent_sessions_lock:
+            _agent_sessions[session_id] = agent
+        
+        # Get summary and suggestions
+        summary = context.get_summary()
+        suggested_questions = agent.get_suggested_questions()
+        
+        logger.info(f"Created agent session {session_id} for {cv_id} / {jd_id}")
+        
+        return JSONResponse(content={
+            "status": "success",
+            "session_id": session_id,
+            "summary": summary,
+            "suggested_questions": suggested_questions
+        })
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error creating agent session: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating agent session: {str(e)}"
+        )
+
+@app.post("/agent/ask")
+async def ask_agent(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Ask the agent a question about a CV scoring.
+    
+    Request body:
+    {
+        "session_id": "unique_session_id",
+        "question": "Why did this candidate score highly?"
+    }
+    
+    Returns:
+    {
+        "question": "...",
+        "answer": "...",
+        "sources": [...],
+        "status": "success"
+    }
+    """
+    try:
+        body = await request.json()
+        session_id = body.get("session_id")
+        question = body.get("question")
+        
+        if not session_id or not question:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required fields: session_id, question"
+            )
+        
+        # Retrieve agent from session cache
+        with _agent_sessions_lock:
+            agent = _agent_sessions.get(session_id)
+        
+        if not agent:
+            raise HTTPException(
+                status_code=404,
+                detail="Session not found. Please create a new session."
+            )
+        
+        # Ask the agent
+        result = agent.ask(question)
+        
+        logger.info(f"Agent question answered for session {session_id}")
+        
+        return JSONResponse(content=result)
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error asking agent: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing question: {str(e)}"
+        )
+
+@app.delete("/agent/session/{session_id}")
+async def close_agent_session(
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """Close an agent session and free up resources."""
+    try:
+        with _agent_sessions_lock:
+            if session_id in _agent_sessions:
+                del _agent_sessions[session_id]
+                logger.info(f"Closed agent session {session_id}")
+                return JSONResponse(content={
+                    "status": "success",
+                    "message": "Session closed"
+                })
+            else:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Session not found"
+                )
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error closing agent session: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error closing session: {str(e)}"
+        )
+
+@app.get("/agent/sessions")
+async def list_agent_sessions(current_user: Dict[str, Any] = Depends(get_current_user)):
+    """List all active agent sessions (admin only)."""
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    with _agent_sessions_lock:
+        sessions = list(_agent_sessions.keys())
+    
+    return JSONResponse(content={
+        "active_sessions": len(sessions),
+        "session_ids": sessions
+    })
+
+@app.post("/agent/batch-session")
+async def create_batch_agent_session(
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Create a new batch agent session for ALL candidates from a search.
+    This gives the agent access to all candidates and the job description for comparison.
+    
+    Request body:
+    {
+        "results": [...],  // Full search results array from /search-cvs/
+        "jd_id": "job_description_id",
+        "company_name": "company",
+        "job_title": "job_title"
+    }
+    
+    Returns:
+    {
+        "session_id": "unique_session_id",
+        "summary": {...},
+        "suggested_questions": [...]
+    }
+    """
+    try:
+        body = await request.json()
+        results = body.get("results", [])
+        jd_id = body.get("jd_id")
+        company_name = body.get("company_name")
+        job_title = body.get("job_title")
+        
+        if not results:
+            raise HTTPException(
+                status_code=400,
+                detail="No results provided. Please provide search results."
+            )
+        
+        if not company_name or not job_title:
+            raise HTTPException(
+                status_code=400,
+                detail="Missing required fields: company_name, job_title"
+            )
+        
+        # If jd_id not provided, generate it from job_title
+        if not jd_id:
+            temp_inserter = JDDataInserter()
+            jd_id = temp_inserter.generate_jd_id(job_title, company_name)
+            logger.info(f"Generated jd_id from job_title: {jd_id}")
+        
+        # Check company access
+        _enforce_company_access(company_name, current_user)
+        
+        # Get dynamic collection names
+        db_name_dyn, cv_collection_mongo, jd_collection_mongo = build_mongo_names(
+            company_name, job_title
+        )
+        
+        # Connect to MongoDB collections
+        mongo_client = MongoClient(config["mongodb"]["connection_string"])
+        cv_collection = mongo_client[db_name_dyn][cv_collection_mongo]
+        jd_collection = mongo_client[db_name_dyn][jd_collection_mongo]
+        
+        # Create batch context
+        logger.info(f"Creating batch context for {len(results)} candidates and JD: {jd_id}")
+        context = BatchCVScoringContext(
+            cv_results=results,
+            jd_id=jd_id,
+            jd_collection=jd_collection,
+            cv_collection=cv_collection,
+            company_name=company_name,
+            job_title=job_title
+        )
+        
+        # Load JD data
+        try:
+            context.load_jd_data()
+            logger.info(f"✅ JD data loaded: {context.jd_data.get('job_title', 'N/A')}")
+        except Exception as e:
+            logger.error(f"Failed to load JD data: {e}")
+            raise HTTPException(status_code=404, detail=f"JD not found: {str(e)}")
+        
+        # Load all CV data
+        try:
+            context.load_cv_data_for_all()
+            logger.info(f"✅ Loaded {len(context.cv_data_map)} CV records")
+        except Exception as e:
+            logger.error(f"Failed to load CV data: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to load CV data: {str(e)}")
+        
+        # Initialize batch agent
+        logger.info(f"Initializing batch agent")
+        try:
+            agent = BatchCVExplainabilityAgent(
+                context=context,
+                config=config,
+                company_name=company_name
+            )
+            logger.info(f"✅ Batch agent initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize batch agent: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to initialize batch agent: {str(e)}")
+        
+        # Generate unique session ID
+        import uuid
+        session_id = str(uuid.uuid4())
+        
+        # Store agent in session cache
+        with _agent_sessions_lock:
+            _agent_sessions[session_id] = agent
+        
+        # Get summary and suggestions
+        summary = context.get_summary()
+        suggested_questions = agent.get_suggested_questions()
+        
+        logger.info(f"✅ Created batch agent session {session_id} for {len(results)} candidates")
+        
+        return JSONResponse(content={
+            "status": "success",
+            "session_id": session_id,
+            "summary": summary,
+            "suggested_questions": suggested_questions,
+            "candidate_count": len(results)
+        })
+        
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        logger.error(f"Error creating batch agent session: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error creating batch agent session: {str(e)}"
+        )
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on shutdown."""
     cvjd_vector_search.close()
+    
+    # Clear agent sessions
+    with _agent_sessions_lock:
+        _agent_sessions.clear()
+    logger.info("Agent sessions cleared on shutdown")

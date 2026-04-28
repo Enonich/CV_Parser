@@ -49,6 +49,13 @@ python-dateutil>=2.8.2
 # HTTP & Utilities
 requests>=2.31.0
 
+# Voice Agent Dependencies (Optional)
+sounddevice>=0.4.6
+openai-whisper>=20231117
+pyttsx3>=2.90
+scipy>=1.11.0
+torch>=2.1.0  # Already listed above, needed for Whisper and Silero VAD
+
 # Note: Make sure Ollama is installed separately for embeddings
 # Download from: https://ollama.ai
 

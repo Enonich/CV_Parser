@@ -1,7 +1,7 @@
 # Admin Panel Features
 
 ## Overview
-The admin panel provides comprehensive system management capabilities for the CV Parser Pro application. Admins have full access to all companies, can manage users, perform bulk operations, maintain system health, and monitor activity.
+The admin panel provides comprehensive system management capabilities for the EbitsCV Screener application. Admins have full access to all companies, can manage users, perform bulk operations, maintain system health, and monitor activity.
 
 ## Feature Summary
 
@@ -301,4 +301,4 @@ Potential additions:
 
 **Document Version:** 1.0  
 **Last Updated:** October 29, 2025  
-**Author:** CV Parser Pro Development Team
+**Author:** EbitsCV Screener Development Team
