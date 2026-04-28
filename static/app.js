@@ -300,6 +300,24 @@ $('#close-job-details')?.addEventListener('click', () => {
   loadUserJobs();
 });
 
+/* ==================== MOBILE MENU ==================== */
+$('#mobile-menu-btn').addEventListener('click', () => {
+  $('#mobile-menu').classList.remove('hidden');
+  $('#mobile-menu-panel').classList.remove('-translate-x-full');
+});
+
+$('#close-mobile-menu').addEventListener('click', () => {
+  $('#mobile-menu').classList.add('hidden');
+  $('#mobile-menu-panel').classList.add('-translate-x-full');
+});
+
+$('#mobile-menu').addEventListener('click', (e) => {
+  if (e.target === $('#mobile-menu')) {
+    $('#mobile-menu').classList.add('hidden');
+    $('#mobile-menu-panel').classList.add('-translate-x-full');
+  }
+});
+
 /* ==================== TAB NAVIGATION ==================== */
 function showTab(tab, pushState = true) {
   // Hide all sections
@@ -923,7 +941,16 @@ if (searchBtn) {
       currentCompany = company;
       currentJob = job;
       updateContextDisplay();
-      displayResults(data.results);
+      
+      // Pass metadata to displayResults
+      const metadata = {
+        company_name: data.company_name || company,
+        job_title: data.job_title || job,
+        jd_id_used: data.jd_id_used,
+        rerank_mode: data.rerank_mode
+      };
+      displayResults(data.results, metadata);
+      
       const lastSearchEl = $('#last-search');
       if (lastSearchEl) {
         lastSearchEl.textContent = `${data.results.length} results`;
@@ -946,7 +973,15 @@ else {
   console.error('[Init] Search button not found!');
 }
 
-function displayResults(results) {
+// Store results globally for batch agent access
+let lastSearchResults = [];
+let lastSearchMetadata = {};
+
+function displayResults(results, metadata = {}) {
+  // Store for batch agent
+  lastSearchResults = results;
+  lastSearchMetadata = metadata;
+  
   const container = $('#results-list');
   const count = $('#result-count');
   count.textContent = results.length;
@@ -989,9 +1024,11 @@ function displayResults(results) {
               <div>Reranker: ${ceScore}</div>
             </div>
           ` : ''}
-          <button class="view-cv-btn mt-2 bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded" data-cv-id="${r.cv_id}">
-            <i class="fas fa-eye"></i> View CV
-          </button>
+          <div class="mt-2 flex flex-col gap-1">
+            <button class="view-cv-btn bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1 rounded" data-cv-id="${r.cv_id}">
+              <i class="fas fa-eye"></i> View CV
+            </button>
+          </div>
         </div>
       </div>
       <div class="mb-2">
@@ -1096,7 +1133,41 @@ function displayResults(results) {
       }
     });
   });
+  
+  // Add batch agent button at the bottom
+  const batchAgentSection = document.createElement('div');
+  batchAgentSection.className = 'bg-gradient-to-r from-purple-50 to-indigo-50 p-6 rounded-lg shadow-md border-2 border-purple-200 mt-6 mb-4';
+  batchAgentSection.innerHTML = `
+    <div class="flex items-center justify-between">
+      <div class="flex-1">
+        <h3 class="text-lg font-bold text-gray-800 flex items-center gap-2">
+          <i class="fas fa-robot text-purple-600 text-xl"></i>
+          AI Assistant - Analyze All Candidates
+        </h3>
+        <p class="text-sm text-gray-600 mt-1">
+          Ask questions about all ${results.length} candidates and compare them using AI
+        </p>
+      </div>
+      <button id="batch-agent-btn" class="bg-purple-600 hover:bg-purple-700 text-white px-6 py-3 rounded-lg shadow-lg hover:shadow-xl transition-all duration-200 flex items-center gap-2 font-semibold">
+        <i class="fas fa-comments"></i>
+        Open AI Assistant
+      </button>
+    </div>
+  `;
+  container.appendChild(batchAgentSection);
+  
+  // Add click handler for batch agent
+  document.getElementById('batch-agent-btn')?.addEventListener('click', () => {
+    openBatchAgentChat(lastSearchResults, lastSearchMetadata);
+  });
 }
+
+/* Clear search results */
+$('#clear-search-results')?.addEventListener('click', () => {
+  $('#search-results').classList.add('hidden');
+  $('#results-list').innerHTML = '';
+  $('#result-count').textContent = '0';
+});
 
 /* ==================== DASHBOARD ==================== */
 async function loadDashboard() {
@@ -1641,4 +1712,338 @@ async function viewCV(cvId) {
       </div>
     `;
   }
+}
+
+/* ==================== AGENT CHAT FUNCTIONALITY ==================== */
+let currentAgentSession = null;
+let isBatchAgent = false;
+
+// Open batch agent chat modal (for all candidates)
+window.openBatchAgentChat = async function(results, metadata) {
+  console.log('[Batch Agent] Opening chat for all candidates:', results.length);
+  isBatchAgent = true;
+  
+  const modal = document.getElementById('agent-modal');
+  const subtitle = document.getElementById('agent-subtitle');
+  const messagesContainer = document.getElementById('agent-chat-messages');
+  const suggestionsContainer = document.getElementById('agent-suggestions');
+  const sendBtn = document.getElementById('agent-send-btn');
+  
+  // Show modal
+  modal.classList.remove('hidden');
+  
+  // Clear previous messages
+  messagesContainer.innerHTML = `
+    <div class="text-center text-gray-500 py-8">
+      <i class="fas fa-spinner fa-spin text-4xl mb-3 text-blue-600"></i>
+      <p class="font-medium">Initializing AI Assistant for All Candidates...</p>
+    </div>
+  `;
+  suggestionsContainer.innerHTML = '';
+  
+  try {
+    // Create batch agent session
+    const response = await authFetch(`${API_BASE}/agent/batch-session`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        results: results,
+        jd_id: metadata.jd_id_used || currentJob,
+        company_name: metadata.company_name || currentCompany,
+        job_title: metadata.job_title || currentJob
+      })
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.detail || `Failed to create batch agent session: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    currentAgentSession = data.session_id;
+    
+    // Update subtitle with batch info
+    subtitle.textContent = `Analyzing ${data.candidate_count} candidates for ${data.summary.job_title} at ${data.summary.company}`;
+    
+    // Show welcome message
+    messagesContainer.innerHTML = `
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+        <div class="flex items-start space-x-3">
+          <i class="fas fa-robot text-blue-600 text-2xl mt-1"></i>
+          <div class="flex-1">
+            <p class="font-medium text-gray-800">Hello! I'm your AI HR Assistant.</p>
+            <p class="text-sm text-gray-600 mt-1">
+              I have analyzed <strong>${data.candidate_count} candidates</strong> for the <strong>${data.summary.job_title}</strong> position at <strong>${data.summary.company}</strong>.
+            </p>
+            <p class="text-sm text-gray-600 mt-2">
+              I can help you compare candidates, identify top performers, understand skill gaps, and answer any questions about the applicant pool.
+            </p>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Show suggested questions
+    if (data.suggested_questions && data.suggested_questions.length > 0) {
+      suggestionsContainer.innerHTML = data.suggested_questions.map(q => `
+        <button class="text-xs px-3 py-1 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors agent-suggestion-btn">
+          ${q}
+        </button>
+      `).join('');
+      
+      // Add click handlers for suggestions
+      document.querySelectorAll('.agent-suggestion-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.getElementById('agent-question-input').value = btn.textContent.trim();
+          document.getElementById('agent-question-form').dispatchEvent(new Event('submit'));
+        });
+      });
+    }
+    
+    console.log('[Batch Agent] Session created:', currentAgentSession);
+    
+  } catch (err) {
+    console.error('[Batch Agent] Error creating session:', err);
+    messagesContainer.innerHTML = `
+      <div class="text-center text-red-600 py-8">
+        <i class="fas fa-exclamation-circle text-4xl mb-3"></i>
+        <p class="font-medium">Failed to initialize AI assistant</p>
+        <p class="text-sm text-gray-600">${err.message}</p>
+      </div>
+    `;
+    sendBtn.disabled = true;
+  }
+}
+
+// Open agent chat modal (for single candidate - kept for backward compatibility)
+window.openAgentChat = async function(cvId, scoringResult) {
+  console.log('[Agent] Opening chat for CV:', cvId);
+  isBatchAgent = false;
+  
+  const modal = document.getElementById('agent-modal');
+  const subtitle = document.getElementById('agent-subtitle');
+  const messagesContainer = document.getElementById('agent-chat-messages');
+  const suggestionsContainer = document.getElementById('agent-suggestions');
+  const sendBtn = document.getElementById('agent-send-btn');
+  
+  // Show modal
+  modal.classList.remove('hidden');
+  
+  // Clear previous messages
+  messagesContainer.innerHTML = `
+    <div class="text-center text-gray-500 py-8">
+      <i class="fas fa-spinner fa-spin text-4xl mb-3 text-blue-600"></i>
+      <p class="font-medium">Initializing HR Assistant...</p>
+    </div>
+  `;
+  suggestionsContainer.innerHTML = '';
+  
+  try {
+    // Create agent session
+    const response = await authFetch(`${API_BASE}/agent/session`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        cv_id: cvId,
+        jd_id: currentJob, // Set by context selection
+        company_name: currentCompany,
+        job_title: currentJob,
+        scoring_result: scoringResult || {}
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to create agent session: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    currentAgentSession = data.session_id;
+    
+    // Update subtitle with candidate info
+    subtitle.textContent = `Candidate: ${data.summary.candidate_name} | Score: ${(data.summary.combined_score * 100).toFixed(1)}%`;
+    
+    // Show welcome message
+    messagesContainer.innerHTML = `
+      <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+        <div class="flex items-start space-x-3">
+          <i class="fas fa-robot text-blue-600 text-2xl mt-1"></i>
+          <div class="flex-1">
+            <p class="font-medium text-gray-800">Hello! I'm your HR Assistant.</p>
+            <p class="text-sm text-gray-600 mt-1">
+              I have analyzed ${data.summary.candidate_name}'s CV for the <strong>${data.summary.job_title}</strong> position at <strong>${data.summary.company}</strong>.
+            </p>
+            <p class="text-sm text-gray-600 mt-2">
+              Their overall match score is <strong class="text-blue-700">${(data.summary.combined_score * 100).toFixed(1)}%</strong> 
+              with <strong class="text-green-700">${(data.summary.mandatory_coverage * 100).toFixed(0)}%</strong> coverage of mandatory skills.
+            </p>
+            <p class="text-sm text-gray-600 mt-2">
+              Ask me anything about their qualifications, experience, or scoring!
+            </p>
+          </div>
+        </div>
+      </div>
+    `;
+    
+    // Show suggested questions
+    if (data.suggested_questions && data.suggested_questions.length > 0) {
+      suggestionsContainer.innerHTML = data.suggested_questions.map(q => `
+        <button class="text-xs px-3 py-1 bg-blue-100 text-blue-700 rounded-full hover:bg-blue-200 transition-colors agent-suggestion-btn">
+          ${q}
+        </button>
+      `).join('');
+      
+      // Add click handlers for suggestions
+      document.querySelectorAll('.agent-suggestion-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.getElementById('agent-question-input').value = btn.textContent.trim();
+          document.getElementById('agent-question-form').dispatchEvent(new Event('submit'));
+        });
+      });
+    }
+    
+    console.log('[Agent] Session created:', currentAgentSession);
+    
+  } catch (err) {
+    console.error('[Agent] Error creating session:', err);
+    messagesContainer.innerHTML = `
+      <div class="text-center text-red-600 py-8">
+        <i class="fas fa-exclamation-circle text-4xl mb-3"></i>
+        <p class="font-medium">Failed to initialize assistant</p>
+        <p class="text-sm text-gray-600">${err.message}</p>
+      </div>
+    `;
+    sendBtn.disabled = true;
+  }
+}
+
+// Handle agent question submission
+document.getElementById('agent-question-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  
+  const input = document.getElementById('agent-question-input');
+  const question = input.value.trim();
+  const messagesContainer = document.getElementById('agent-chat-messages');
+  const sendBtn = document.getElementById('agent-send-btn');
+  
+  if (!question || !currentAgentSession) return;
+  
+  // Add user message
+  const userMsgEl = document.createElement('div');
+  userMsgEl.className = 'flex justify-end mb-4';
+  userMsgEl.innerHTML = `
+    <div class="bg-blue-600 text-white rounded-lg px-4 py-2 max-w-md">
+      <p class="text-sm">${escapeHtml(question)}</p>
+    </div>
+  `;
+  messagesContainer.appendChild(userMsgEl);
+  
+  // Clear input
+  input.value = '';
+  
+  // Show loading indicator
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'flex justify-start mb-4';
+  loadingEl.id = 'agent-loading';
+  loadingEl.innerHTML = `
+    <div class="bg-gray-200 rounded-lg px-4 py-2 max-w-md">
+      <i class="fas fa-spinner fa-spin mr-2"></i>
+      <span class="text-sm text-gray-600">Thinking...</span>
+    </div>
+  `;
+  messagesContainer.appendChild(loadingEl);
+  messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  
+  // Disable send button
+  sendBtn.disabled = true;
+  
+  try {
+    const response = await authFetch(`${API_BASE}/agent/ask`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        session_id: currentAgentSession,
+        question: question
+      })
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Failed to get answer: ${response.statusText}`);
+    }
+    
+    const data = await response.json();
+    
+    // Remove loading indicator
+    document.getElementById('agent-loading')?.remove();
+    
+    // Add agent response
+    const agentMsgEl = document.createElement('div');
+    agentMsgEl.className = 'flex justify-start mb-4';
+    agentMsgEl.innerHTML = `
+      <div class="bg-gray-100 rounded-lg px-4 py-3 max-w-md">
+        <div class="flex items-start space-x-2">
+          <i class="fas fa-robot text-blue-600 mt-1"></i>
+          <div class="flex-1">
+            <p class="text-sm text-gray-800 whitespace-pre-wrap">${escapeHtml(data.answer)}</p>
+            ${data.sources && data.sources.length > 0 ? `
+              <p class="text-xs text-gray-500 mt-2 italic">
+                <i class="fas fa-info-circle"></i> Based on ${data.sources.length} source(s)
+              </p>
+            ` : ''}
+          </div>
+        </div>
+      </div>
+    `;
+    messagesContainer.appendChild(agentMsgEl);
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+    
+  } catch (err) {
+    console.error('[Agent] Error asking question:', err);
+    
+    // Remove loading indicator
+    document.getElementById('agent-loading')?.remove();
+    
+    // Show error message
+    const errorEl = document.createElement('div');
+    errorEl.className = 'flex justify-start mb-4';
+    errorEl.innerHTML = `
+      <div class="bg-red-50 border border-red-200 rounded-lg px-4 py-2 max-w-md">
+        <p class="text-sm text-red-600">
+          <i class="fas fa-exclamation-circle mr-2"></i>
+          Failed to get answer: ${err.message}
+        </p>
+      </div>
+    `;
+    messagesContainer.appendChild(errorEl);
+  } finally {
+    sendBtn.disabled = false;
+    input.focus();
+  }
+});
+
+// Close agent modal
+document.getElementById('close-agent-modal')?.addEventListener('click', async () => {
+  const modal = document.getElementById('agent-modal');
+  modal.classList.add('hidden');
+  
+  // Close session
+  if (currentAgentSession) {
+    try {
+      await authFetch(`${API_BASE}/agent/session/${currentAgentSession}`, {
+        method: 'DELETE'
+      });
+      console.log('[Agent] Session closed:', currentAgentSession);
+    } catch (err) {
+      console.error('[Agent] Error closing session:', err);
+    }
+    currentAgentSession = null;
+  }
+});
+
+// Event delegation for "Ask Agent" buttons (removed - now using batch agent only)
+
+// Helper function to escape HTML
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }

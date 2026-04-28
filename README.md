@@ -12,6 +12,7 @@ A modern web application for uploading CVs and job descriptions, then getting in
 - **Skill-Aware Ranking**: Mandatory vs optional skills with gating + bonus weighting
 - **Impact-Aware Ranking**: Quantified achievement (verb + metric + outcome) extraction with relevance filtering to required skills
 - **Interpretability**: Per-candidate `score_components`, skill coverage, depth, recency, impact events (details mode)
+- **🤖 AI HR Assistant**: Interactive chat agent that explains scoring decisions, analyzes skills, and answers questions about candidates
 - **Real-time Scoring**: Efficient multi-stage retrieval and fusion
 - **Modern UI**: Responsive design with Bootstrap 5
 - **Email Display**: Shows original email addresses instead of hashed IDs
@@ -41,7 +42,7 @@ Make sure you have the following installed:
    ```bash
    python run_webapp.py
        OR
-   uvicorn workflow:app --host 0.0.0.0 --port 8000
+   uvicorn backend.api.workflow:app --host 0.0.0.0 --port 8000
    ```
 
 4. **Access the Web Interface**:
@@ -64,6 +65,18 @@ Make sure you have the following installed:
 - Each CV shows its email address (original identifier)
 - Color-coded scoring: Excellent (green), Good (blue), Fair (yellow), Poor (red)
 
+### Step 4: Ask the AI Agent (New! 🤖)
+- Click the **"Ask Agent"** button on any CV result
+- Interactive chat opens with the AI HR Assistant
+- Ask questions about:
+  - Why the candidate scored a certain way
+  - What skills they're missing
+  - Their relevant experience and achievements
+  - How they compare to requirements
+- Get instant, context-aware answers based on full scoring analysis
+
+👉 **Quick Start Guide**: See [docs/AGENT_QUICK_START.md](docs/AGENT_QUICK_START.md) for detailed usage
+
 ## API Endpoints
 
 ### Web Interface
@@ -76,6 +89,11 @@ Make sure you have the following installed:
 
 ### Search & Scoring
 - `POST /search-cvs/` - Search and score CVs against job description (returns hybrid + skill + impact enriched ranking)
+
+### AI Agent (New!)
+- `POST /agent/session` - Create new agent session with CV and scoring context
+- `POST /agent/ask` - Ask questions to the AI agent
+- `DELETE /agent/session/{session_id}` - Close agent session
 
 ### Health Check
 - `GET /health` - API health status

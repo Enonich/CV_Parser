@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>CV Parser Pro</title>
+  <title>EbitsCV Screener</title>
 
   <!-- Tailwind (via CDN – you can replace with a local build later) -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -31,7 +31,10 @@
   <header class="bg-white shadow-sm border-b fixed top-0 left-0 right-0 z-50">
     <div class="flex items-center justify-between px-6 py-3">
       <div class="flex items-center space-x-8">
-        <h1 class="text-2xl font-bold text-blue-900">CV Parser Pro</h1>
+        <button id="mobile-menu-btn" class="lg:hidden text-gray-600 hover:text-blue-700 focus:outline-none">
+          <i class="fas fa-bars text-xl"></i>
+        </button>
+        <h1 class="text-2xl font-bold text-blue-900">EbitsCV Screener</h1>
         <nav class="hidden md:flex space-x-6">
           <a href="#" class="tab-link text-blue-700 font-medium" data-tab="dashboard">Dashboard</a>
           <a href="#" class="tab-link text-gray-600 hover:text-blue-700" data-tab="upload-cv">Upload CV</a>
@@ -46,6 +49,26 @@
       </div>
     </div>
   </header>
+
+  <!-- ==================== MOBILE MENU ==================== -->
+  <div id="mobile-menu" class="fixed inset-0 bg-black bg-opacity-50 z-40 hidden lg:hidden">
+    <div class="fixed top-0 left-0 w-64 h-full bg-white shadow-lg transform -translate-x-full transition-transform duration-300 ease-in-out" id="mobile-menu-panel">
+      <div class="flex items-center justify-between p-4 border-b">
+        <h2 class="text-lg font-semibold text-gray-800">Menu</h2>
+        <button id="close-mobile-menu" class="text-gray-600 hover:text-gray-800">
+          <i class="fas fa-times"></i>
+        </button>
+      </div>
+      <nav class="p-4">
+        <ul class="space-y-3">
+          <li><a href="#" class="tab-link block py-2 px-3 text-blue-700 font-medium rounded hover:bg-blue-50" data-tab="dashboard"><i class="fas fa-tachometer-alt mr-3"></i>Dashboard</a></li>
+          <li><a href="#" class="tab-link block py-2 px-3 text-gray-600 hover:text-blue-700 hover:bg-blue-50 rounded" data-tab="upload-cv"><i class="fas fa-user-plus mr-3"></i>Upload CV</a></li>
+          <li><a href="#" class="tab-link block py-2 px-3 text-gray-600 hover:text-blue-700 hover:bg-blue-50 rounded" data-tab="upload-jd"><i class="fas fa-file-alt mr-3"></i>Upload JD</a></li>
+          <li><a href="#" class="tab-link block py-2 px-3 text-gray-600 hover:text-blue-700 hover:bg-blue-50 rounded" data-tab="search"><i class="fas fa-search mr-3"></i>Search CVs</a></li>
+        </ul>
+      </nav>
+    </div>
+  </div>
 
   <!-- ==================== SIDEBAR ==================== -->
   <aside class="fixed left-0 top-16 bottom-0 w-64 bg-white shadow-md p-6 hidden lg:block">
@@ -85,7 +108,22 @@
           <span id="jobs-count" class="text-sm text-gray-500"></span>
         </div>
         <div id="jobs-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <p class="text-sm text-gray-500 italic col-span-full">Loading jobs...</p>
+          <!-- Loading skeleton -->
+          <div class="animate-pulse bg-gray-200 rounded-lg p-4">
+            <div class="h-4 bg-gray-300 rounded mb-2"></div>
+            <div class="h-3 bg-gray-300 rounded mb-1"></div>
+            <div class="h-3 bg-gray-300 rounded w-3/4"></div>
+          </div>
+          <div class="animate-pulse bg-gray-200 rounded-lg p-4">
+            <div class="h-4 bg-gray-300 rounded mb-2"></div>
+            <div class="h-3 bg-gray-300 rounded mb-1"></div>
+            <div class="h-3 bg-gray-300 rounded w-3/4"></div>
+          </div>
+          <div class="animate-pulse bg-gray-200 rounded-lg p-4">
+            <div class="h-4 bg-gray-300 rounded mb-2"></div>
+            <div class="h-3 bg-gray-300 rounded mb-1"></div>
+            <div class="h-3 bg-gray-300 rounded w-3/4"></div>
+          </div>
         </div>
       </div>
 
@@ -127,7 +165,31 @@
             <button class="tab-link text-blue-600 hover:underline text-sm" data-tab="search">View All →</button>
           </div>
           <div id="top-candidates" class="space-y-3">
-            <p class="text-sm text-gray-500 italic">Select a job to see rankings</p>
+            <!-- Loading skeleton -->
+            <div class="animate-pulse bg-gray-200 rounded-lg p-3">
+              <div class="flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                  <div class="w-8 h-8 bg-gray-300 rounded-full"></div>
+                  <div>
+                    <div class="h-4 bg-gray-300 rounded w-32 mb-1"></div>
+                    <div class="h-3 bg-gray-300 rounded w-24"></div>
+                  </div>
+                </div>
+                <div class="h-6 bg-gray-300 rounded w-12"></div>
+              </div>
+            </div>
+            <div class="animate-pulse bg-gray-200 rounded-lg p-3">
+              <div class="flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                  <div class="w-8 h-8 bg-gray-300 rounded-full"></div>
+                  <div>
+                    <div class="h-4 bg-gray-300 rounded w-32 mb-1"></div>
+                    <div class="h-3 bg-gray-300 rounded w-24"></div>
+                  </div>
+                </div>
+                <div class="h-6 bg-gray-300 rounded w-12"></div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -146,7 +208,12 @@
       <h2 class="text-3xl font-bold mb-8 text-center">Upload Candidate CV</h2>
       <form id="cv-form" enctype="multipart/form-data" class="space-y-6">
         <div>
-          <label class="block text-sm font-medium text-gray-700">Job Title *</label>
+          <label class="block text-sm font-medium text-gray-700 flex items-center">
+            Job Title *
+            <span class="ml-1 text-gray-400 hover:text-gray-600 cursor-help" title="Enter the specific job role (e.g., 'Senior Data Analyst', not just 'Data'). This helps match CVs accurately.">
+              <i class="fas fa-info-circle"></i>
+            </span>
+          </label>
           <input type="text" name="job_title" required class="mt-1 block w-full border rounded-md px-3 py-2" placeholder="e.g., Senior ML Engineer" list="job-titles-list" />
           <datalist id="job-titles-list"></datalist>
           <p class="mt-1 text-xs text-gray-500">Enter a new job title or select an existing one</p>
@@ -199,7 +266,12 @@
       <h2 class="text-3xl font-bold mb-8 text-center">Upload Job Description</h2>
       <form id="jd-form" enctype="multipart/form-data" class="space-y-6">
         <div>
-          <label class="block text-sm font-medium text-gray-700">Job Title *</label>
+          <label class="block text-sm font-medium text-gray-700 flex items-center">
+            Job Title *
+            <span class="ml-1 text-gray-400 hover:text-gray-600 cursor-help" title="Enter the specific job role that matches your CV uploads.">
+              <i class="fas fa-info-circle"></i>
+            </span>
+          </label>
           <input type="text" name="job_title" required class="mt-1 block w-full border rounded-md px-3 py-2" placeholder="e.g., Data Analyst" list="jd-job-titles-list" />
           <datalist id="jd-job-titles-list"></datalist>
           <p class="mt-1 text-xs text-gray-500">Enter a new job title or select an existing one</p>
@@ -302,7 +374,12 @@ Responsibilities:
       <div id="search-results" class="hidden space-y-4">
         <div class="flex justify-between items-center mb-4">
           <h3 class="text-xl font-semibold">Ranked Candidates</h3>
-          <p class="text-sm text-gray-600">Showing <span id="result-count">0</span> results</p>
+          <div class="flex items-center space-x-2">
+            <p class="text-sm text-gray-600">Showing <span id="result-count">0</span> results</p>
+            <button id="clear-search-results" class="text-sm text-red-600 hover:underline">
+              <i class="fas fa-times mr-1"></i>Clear
+            </button>
+          </div>
         </div>
         <div id="results-list"></div>
       </div>
@@ -380,6 +457,60 @@ Responsibilities:
             <p>Loading CV...</p>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent Chat Modal -->
+  <div id="agent-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+    <div class="bg-white rounded-lg shadow-xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col">
+      <!-- Header -->
+      <div class="flex justify-between items-center p-6 border-b bg-gradient-to-r from-blue-600 to-purple-600 text-white">
+        <div>
+          <h3 class="text-2xl font-bold flex items-center">
+            <i class="fas fa-robot mr-3"></i>
+            HR Assistant
+          </h3>
+          <p class="text-sm text-blue-100 mt-1" id="agent-subtitle">Ask questions about this candidate</p>
+        </div>
+        <button id="close-agent-modal" class="text-white hover:text-gray-200 text-2xl">&times;</button>
+      </div>
+
+      <!-- Chat Messages -->
+      <div class="flex-1 overflow-y-auto p-6 bg-gray-50" id="agent-chat-messages" style="max-height: 500px;">
+        <div class="text-center text-gray-500 py-8" id="agent-welcome">
+          <i class="fas fa-comments text-4xl mb-3 text-blue-600"></i>
+          <p class="font-medium">Welcome! I'm your HR Assistant.</p>
+          <p class="text-sm mt-2">I can help you understand the candidate's profile and scoring.</p>
+        </div>
+      </div>
+
+      <!-- Suggested Questions -->
+      <div class="px-6 py-3 bg-white border-t border-gray-200" id="agent-suggestions-container">
+        <p class="text-xs text-gray-500 mb-2">Suggested questions:</p>
+        <div id="agent-suggestions" class="flex flex-wrap gap-2">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <!-- Input Area -->
+      <div class="p-4 border-t bg-white">
+        <form id="agent-question-form" class="flex space-x-2">
+          <input 
+            type="text" 
+            id="agent-question-input" 
+            placeholder="Ask me anything about this candidate..."
+            class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            autocomplete="off"
+          />
+          <button 
+            type="submit" 
+            class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+            id="agent-send-btn"
+          >
+            <i class="fas fa-paper-plane"></i>
+          </button>
+        </form>
       </div>
     </div>
   </div>

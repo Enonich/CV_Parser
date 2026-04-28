@@ -119,6 +119,24 @@ function addActivity(msg) {
   log.insertBefore(p, log.firstChild);
 }
 
+/* ==================== MOBILE MENU ==================== */
+$('#mobile-menu-btn').addEventListener('click', () => {
+  $('#mobile-menu').classList.remove('hidden');
+  $('#mobile-menu-panel').classList.remove('-translate-x-full');
+});
+
+$('#close-mobile-menu').addEventListener('click', () => {
+  $('#mobile-menu').classList.add('hidden');
+  $('#mobile-menu-panel').classList.add('-translate-x-full');
+});
+
+$('#mobile-menu').addEventListener('click', (e) => {
+  if (e.target === $('#mobile-menu')) {
+    $('#mobile-menu').classList.add('hidden');
+    $('#mobile-menu-panel').classList.add('-translate-x-full');
+  }
+});
+
 /* ==================== LOAD ALL COMPANIES ==================== */
 async function loadAllCompanies() {
   try {
